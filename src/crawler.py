@@ -440,7 +440,7 @@ class WebCrawler:
             return False, "Crawl already in progress"
 
         try:
-            from src.crawl_db import get_resume_data, load_crawled_urls, set_crawl_status
+            from src.crawl_db import get_resume_data, load_crawled_urls, load_crawl_queue, set_crawl_status
             from collections import deque
 
             # Load crawl data
@@ -483,6 +483,7 @@ class WebCrawler:
                 url = url_data.get('url')
                 if url:
                     self.link_manager.all_discovered_urls.add(url)
+                    self.link_manager.visited_urls.add(url)
 
             # Load links and restore to link manager
             loaded_links = load_crawl_links(crawl_id)
@@ -519,11 +520,18 @@ class WebCrawler:
 
             # Restore queue state from checkpoint
             checkpoint = crawl_data.get('resume_checkpoint', {})
-            if checkpoint:
+            persisted_queue = load_crawl_queue(crawl_id)
+            if checkpoint or persisted_queue:
                 # Restore discovered URLs queue
-                if 'discovered_urls' in checkpoint:
+                discovered_list = []
+                if persisted_queue:
+                    discovered_list = persisted_queue
+                elif 'discovered_urls' in checkpoint:
                     discovered_list = checkpoint['discovered_urls']
+                if discovered_list:
                     self.link_manager.discovered_urls = deque(discovered_list)
+                    for pending_url, _depth in discovered_list:
+                        self.link_manager.all_discovered_urls.add(pending_url)
 
                 # Restore visited URLs set
                 if 'visited_urls' in checkpoint:
@@ -701,13 +709,14 @@ class WebCrawler:
         if not self.db_save_enabled or not self.crawl_id or not self.link_manager:
             return
 
-        from src.crawl_db import save_checkpoint
+        from src.crawl_db import replace_crawl_queue, save_checkpoint
 
         try:
             # Get discovered URLs from link manager
             discovered_urls = []
             if hasattr(self.link_manager, 'discovered_urls'):
-                discovered_urls = list(self.link_manager.discovered_urls)[:1000]  # Limit to prevent huge checkpoints
+                discovered_urls = list(self.link_manager.discovered_urls)
+                replace_crawl_queue(self.crawl_id, discovered_urls)
 
             # Get visited URLs
             visited_urls = []
@@ -715,7 +724,7 @@ class WebCrawler:
                 visited_urls = list(self.link_manager.visited_urls)
 
             checkpoint = {
-                'discovered_urls': discovered_urls,
+                'discovered_urls': discovered_urls[:1000],
                 'visited_urls': visited_urls,
                 'pending_count': self.link_manager.get_stats().get('pending', 0)
             }

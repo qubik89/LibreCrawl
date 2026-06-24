@@ -406,6 +406,40 @@ def save_checkpoint(crawl_id, checkpoint_data):
         print(f"Error saving checkpoint: {e}")
         return False
 
+def replace_crawl_queue(crawl_id, queue_items):
+    """Replace persisted pending queue for a crawl."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM crawl_queue WHERE crawl_id = ?', (crawl_id,))
+            cursor.executemany('''
+                INSERT OR IGNORE INTO crawl_queue (crawl_id, url, depth, priority)
+                VALUES (?, ?, ?, ?)
+            ''', [
+                (crawl_id, url, int(depth or 0), index)
+                for index, (url, depth) in enumerate(queue_items or [])
+            ])
+            return True
+    except Exception as e:
+        print(f"Error saving crawl queue: {e}")
+        return False
+
+def load_crawl_queue(crawl_id):
+    """Load persisted pending queue for a crawl."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT url, depth
+                FROM crawl_queue
+                WHERE crawl_id = ?
+                ORDER BY priority, id
+            ''', (crawl_id,))
+            return [(row['url'], row['depth'] or 0) for row in cursor.fetchall()]
+    except Exception as e:
+        print(f"Error loading crawl queue: {e}")
+        return []
+
 def set_crawl_status(crawl_id, status):
     """
     Update crawl status

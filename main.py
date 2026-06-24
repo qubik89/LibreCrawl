@@ -286,7 +286,7 @@ def build_crawl_summary(crawl_id):
 
     if active:
         link_stats = active.link_manager.get_stats() if active.link_manager else {'discovered': discovered}
-        discovered = link_stats.get('discovered', discovered)
+        discovered = max(discovered, link_stats.get('discovered', 0), active.stats.get('discovered', 0))
         crawled = active.stats.get('crawled', crawled)
         depth = active.stats.get('depth', depth)
         if active.stats.get('start_time'):
