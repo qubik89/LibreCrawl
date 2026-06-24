@@ -7,6 +7,7 @@ WORKDIR /app
 # Install system dependencies required for Playwright and Chrome
 RUN apt-get update && apt-get install -y \
     wget \
+    gosu \
     gnupg \
     ca-certificates \
     fonts-liberation \
@@ -52,11 +53,8 @@ RUN mkdir -p /app/data && chown -R librecrawl:librecrawl /app/data
 # Change ownership of the entire app directory
 RUN chown -R librecrawl:librecrawl /app
 
-# Switch to non-root user
-USER librecrawl
-
 # Install all Playwright browsers as non-root user (installs to /home/librecrawl/.cache/ms-playwright)
-RUN playwright install
+RUN gosu librecrawl playwright install
 
 # Expose Flask port
 EXPOSE 5000
@@ -65,6 +63,9 @@ EXPOSE 5000
 ENV FLASK_APP=main.py
 ENV PYTHONUNBUFFERED=1
 
+COPY docker-entrypoint.sh /usr/local/bin/librecrawl-entrypoint
+RUN chmod +x /usr/local/bin/librecrawl-entrypoint
+
 # Run the application
-# The command is handled by docker-compose.yml
+ENTRYPOINT ["librecrawl-entrypoint"]
 CMD ["python", "main.py"]
