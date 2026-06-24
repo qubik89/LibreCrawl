@@ -12,6 +12,7 @@ services:
     environment:
       - FLASK_APP=main.py
       - PYTHONUNBUFFERED=1
+      - SECRET_KEY=${SECRET_KEY}
       # Set to "true" for local mode (no authentication), "false" for production
       # Defaults to "false" — local mode disables all auth and grants admin to everyone
       - LOCAL_MODE=${LOCAL_MODE:-false}

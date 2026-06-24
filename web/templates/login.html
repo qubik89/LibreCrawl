@@ -202,7 +202,7 @@
         <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
         {% endif %}
 
-        {% if not skip_auth %}
+        {% if not registration_disabled and not skip_auth %}
         <div class="register-link">
             Don't have an account? <a href="/register" id="registerLink">Register here</a>
         </div>
@@ -264,6 +264,7 @@
             }
         });
 
+        {% if not guest_disabled and not skip_auth %}
         // Guest login
         const guestBtn = document.getElementById('guestBtn');
         if (guestBtn) guestBtn.addEventListener('click', async () => {
@@ -297,6 +298,7 @@
                 guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
             }
         });
+        {% endif %}
 
         // Check if registration is disabled
         const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
