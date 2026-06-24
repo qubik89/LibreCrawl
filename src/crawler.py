@@ -627,6 +627,10 @@ class WebCrawler:
         from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
 
         try:
+            urls_to_save = list(self.unsaved_urls)
+            links_to_save = list(self.unsaved_links)
+            issues_to_save = list(self.unsaved_issues)
+
             # Save URLs
             if self.unsaved_urls:
                 save_url_batch(self.crawl_id, self.unsaved_urls)
@@ -652,6 +656,18 @@ class WebCrawler:
                 peak_memory_mb=memory_stats.get('peak_mb', 0),
                 estimated_size_mb=memory_stats.get('estimated_crawl_mb', 0)
             )
+
+            if urls_to_save or links_to_save or issues_to_save:
+                try:
+                    from src.crawl_clickhouse import save_batches
+                    save_batches(
+                        self.crawl_id,
+                        urls=urls_to_save,
+                        links=links_to_save,
+                        issues=issues_to_save
+                    )
+                except Exception as e:
+                    print(f"ClickHouse mirror failed for crawl {self.crawl_id}: {e}")
 
             self.last_save_time = time.time()
             print(f"Saved batch to database for crawl {self.crawl_id}")

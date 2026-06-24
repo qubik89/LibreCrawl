@@ -10,3 +10,4 @@ psutil
 bcrypt==4.1.2
 markdown
 python-dotenv
+clickhouse-connect==0.9.2

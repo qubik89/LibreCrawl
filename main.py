@@ -255,10 +255,22 @@ def build_crawl_summary(crawl_id):
 
     active = crawl_jobs.get(crawl_id)
     counts = get_crawl_counts(crawl_id)
+    analytics = None
+    try:
+        from src.crawl_clickhouse import get_summary
+        analytics = get_summary(crawl_id)
+    except Exception as e:
+        print(f"ClickHouse summary unavailable for crawl {crawl_id}: {e}")
+        analytics = None
+
+    analytics_counts = (analytics or {}).get('counts') or {}
+    url_count = analytics_counts.get('urls') or counts['urls']
+    link_count = analytics_counts.get('links') or counts['links']
+    issue_count = analytics_counts.get('issues') or counts['issues']
 
     status = crawl.get('status', 'unknown')
-    discovered = crawl.get('urls_discovered') or counts['urls']
-    crawled = crawl.get('urls_crawled') or counts['urls']
+    discovered = crawl.get('urls_discovered') or url_count
+    crawled = crawl.get('urls_crawled') or url_count
     depth = crawl.get('max_depth_reached') or 0
     speed = 0.0
     progress = min(100, (crawled / max(discovered, 1)) * 100)
@@ -295,14 +307,15 @@ def build_crawl_summary(crawl_id):
             'crawled': crawled,
             'depth': depth,
             'speed': speed,
-            'url_count': counts['urls'],
-            'link_count': counts['links'],
-            'issue_count': counts['issues'],
+            'url_count': url_count,
+            'link_count': link_count,
+            'issue_count': issue_count,
         },
         'progress': progress,
         'memory': memory,
         'memory_data': memory_data,
         'counts': counts,
+        'analytics': analytics,
     }
 
 def get_or_create_crawler():
@@ -360,11 +373,8 @@ def cleanup_old_instances():
 
         for session_id in sessions_to_remove:
             print(f"Cleaning up crawler instance for session: {session_id}")
-            # Stop any running crawls
-            try:
-                crawler_instances[session_id]['crawler'].stop_crawl()
-            except:
-                pass
+            # Server-side crawl jobs are owned by crawl_jobs, not by browser sessions.
+            # Removing an inactive session must not stop a crawl that is still running.
             del crawler_instances[session_id]
 
         if sessions_to_remove:
@@ -1143,6 +1153,22 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
 
         limit = min(limit or request.args.get('limit', 500, type=int), 1000)
         offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        try:
+            from src.crawl_clickhouse import load_urls
+            clickhouse_page = load_urls(crawl_id, limit=limit, offset=offset)
+            if clickhouse_page:
+                return jsonify({
+                    'success': True,
+                    'crawl_id': crawl_id,
+                    'urls': clickhouse_page['rows'],
+                    'limit': limit,
+                    'offset': offset,
+                    'total': clickhouse_page['total'],
+                    'source': 'clickhouse',
+                })
+        except Exception as e:
+            print(f"ClickHouse URL page unavailable for crawl {crawl_id}: {e}")
+
         counts = get_crawl_counts(crawl_id)
         return jsonify({
             'success': True,
@@ -1172,6 +1198,22 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
 
         limit = min(limit or request.args.get('limit', 500, type=int), 1000)
         offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        try:
+            from src.crawl_clickhouse import load_links
+            clickhouse_page = load_links(crawl_id, limit=limit, offset=offset)
+            if clickhouse_page:
+                return jsonify({
+                    'success': True,
+                    'crawl_id': crawl_id,
+                    'links': clickhouse_page['rows'],
+                    'limit': limit,
+                    'offset': offset,
+                    'total': clickhouse_page['total'],
+                    'source': 'clickhouse',
+                })
+        except Exception as e:
+            print(f"ClickHouse link page unavailable for crawl {crawl_id}: {e}")
+
         counts = get_crawl_counts(crawl_id)
         return jsonify({
             'success': True,
@@ -1201,6 +1243,27 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
 
         limit = min(limit or request.args.get('limit', 500, type=int), 1000)
         offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        try:
+            from src.crawl_clickhouse import load_issues
+            clickhouse_page = load_issues(crawl_id, limit=limit, offset=offset)
+            if clickhouse_page:
+                issues = clickhouse_page['rows']
+                current_settings = get_session_settings().get_settings()
+                exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+                exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+                issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+                return jsonify({
+                    'success': True,
+                    'crawl_id': crawl_id,
+                    'issues': issues,
+                    'limit': limit,
+                    'offset': offset,
+                    'total': clickhouse_page['total'],
+                    'source': 'clickhouse',
+                })
+        except Exception as e:
+            print(f"ClickHouse issue page unavailable for crawl {crawl_id}: {e}")
+
         counts = get_crawl_counts(crawl_id)
         issues = load_crawl_issues(crawl_id, limit=limit, offset=offset)
         if issues:

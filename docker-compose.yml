@@ -2,6 +2,8 @@ services:
   librecrawl:
     build: .
     container_name: librecrawl
+    depends_on:
+      - clickhouse
     ports:
       # In local mode: only localhost (127.0.0.1:5000)
       # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
@@ -18,11 +20,20 @@ services:
       - LOCAL_MODE=${LOCAL_MODE:-false}
       # Set to "true" to disable new user registrations
       - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
+      - DISABLE_GUEST=${DISABLE_GUEST:-false}
       # Set to "true" for demo mode (1.5GB per-user memory limit)
       - DEMO_MODE=${DEMO_MODE:-false}
       # DANGEROUS: Set to "true" to allow login as any username with no password
       # (username only used to separate sessions). Do NOT use in production.
       - DANGEROUSLY_SKIP_AUTH=${DANGEROUSLY_SKIP_AUTH:-false}
+      # Optional large-crawl analytics sink
+      - CLICKHOUSE_ENABLED=${CLICKHOUSE_ENABLED:-true}
+      - CLICKHOUSE_HOST=${CLICKHOUSE_HOST:-clickhouse}
+      - CLICKHOUSE_PORT=${CLICKHOUSE_PORT:-8123}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-librecrawl}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE:-false}
       # Uncomment these for SMTP sending
       # - SMTP_HOST=${SMTP_HOST}
       # - SMTP_PORT=${SMTP_PORT}
@@ -53,3 +64,23 @@ services:
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: librecrawl-clickhouse
+    restart: unless-stopped
+    environment:
+      - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-librecrawl}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  clickhouse_data:
+  clickhouse_logs:

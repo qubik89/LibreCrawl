@@ -8,6 +8,7 @@ let crawlState = {
     urls: [],
     links: [],
     issues: [],
+    analytics: null,
     stats: {
         discovered: 0,
         crawled: 0,
@@ -217,6 +218,7 @@ function clearCrawlData() {
     crawlState.urls = [];
     crawlState.links = [];
     crawlState.issues = [];
+    crawlState.analytics = null;
     crawlState.baseUrl = null;
     crawlState.currentCrawlId = null;
     resetServerOffsets();
@@ -413,6 +415,7 @@ async function attachToServerCrawl(crawlId) {
 function updateCrawlData(data) {
     // Update statistics
     crawlState.stats = data.stats || crawlState.stats;
+    crawlState.analytics = data.analytics || crawlState.analytics;
     updateStatsDisplay();
 
     // Update memory statistics
@@ -884,19 +887,23 @@ function updateIssuesTable(issues) {
     const emptyState = document.getElementById('issuesEmptyState');
     const issuesTable = document.getElementById('issuesTable');
 
-    // Count by type
-    let errorCount = 0;
-    let warningCount = 0;
-    let infoCount = 0;
+    // Count by type. Prefer server aggregates for large crawls.
+    const issueCounts = crawlState.analytics?.issue_type_counts || null;
+    let errorCount = issueCounts ? (issueCounts.error || 0) : 0;
+    let warningCount = issueCounts ? (issueCounts.warning || 0) : 0;
+    let infoCount = issueCounts ? (issueCounts.info || 0) : 0;
+    let totalIssues = issueCounts ? Object.values(issueCounts).reduce((sum, count) => sum + count, 0) : issues.length;
 
-    issues.forEach(issue => {
-        if (issue.type === 'error') errorCount++;
-        else if (issue.type === 'warning') warningCount++;
-        else if (issue.type === 'info') infoCount++;
-    });
+    if (!issueCounts) {
+        issues.forEach(issue => {
+            if (issue.type === 'error') errorCount++;
+            else if (issue.type === 'warning') warningCount++;
+            else if (issue.type === 'info') infoCount++;
+        });
+    }
 
     // Update filter counts
-    document.getElementById('issues-all-count').textContent = `(${issues.length})`;
+    document.getElementById('issues-all-count').textContent = `(${totalIssues})`;
     document.getElementById('issues-error-count').textContent = `(${errorCount})`;
     document.getElementById('issues-warning-count').textContent = `(${warningCount})`;
     document.getElementById('issues-info-count').textContent = `(${infoCount})`;
@@ -918,7 +925,6 @@ function updateIssuesTable(issues) {
     // Update issue count in tab button (find the button, not the tab content)
     const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
     if (issuesTabButton) {
-        const totalIssues = issues.length;
         if (totalIssues > 0) {
             let badgeColor = '#3b82f6';
             if (errorCount > 0) badgeColor = '#ef4444';
@@ -959,6 +965,7 @@ function clearAllTables() {
     crawlState.urls = [];
     crawlState.links = [];
     crawlState.issues = [];
+    crawlState.analytics = null;
 
     console.log('All tables cleared');
 }
@@ -1262,6 +1269,20 @@ function isContentType(contentType, type) {
 }
 
 function updateFilterCounts() {
+    if (crawlState.analytics && crawlState.analytics.counts) {
+        const aggregateCounts = crawlState.analytics.counts;
+        [
+            'internal', 'external', '2xx', '3xx', '4xx', '5xx',
+            'no_response', 'html', 'css', 'js', 'images'
+        ].forEach(key => {
+            const element = document.getElementById(key + '-count');
+            if (element) {
+                element.textContent = aggregateCounts[key] || 0;
+            }
+        });
+        return;
+    }
+
     // Count URLs by type and update filter counts
     const counts = {
         internal: 0,
@@ -1307,63 +1328,99 @@ function updateFilterCounts() {
     });
 }
 
+function getAggregateStatusCounts(filterType) {
+    if (!crawlState.analytics || !Array.isArray(crawlState.analytics.status_counts)) {
+        return null;
+    }
+
+    const rows = crawlState.analytics.status_counts.filter(row => {
+        const status = parseInt(row.status_code);
+        if (!filterType) return true;
+        if (filterType === '2xx') return status >= 200 && status < 300;
+        if (filterType === '3xx') return status >= 300 && status < 400;
+        if (filterType === '4xx') return status >= 400 && status < 500;
+        if (filterType === '5xx') return status >= 500;
+        if (filterType === 'no_response') return status === 0 && row.error_type !== 'file_too_large';
+        return false;
+    });
+
+    if (filterType && !['2xx', '3xx', '4xx', '5xx', 'no_response'].includes(filterType)) {
+        return null;
+    }
+
+    const counts = {};
+    rows.forEach(row => {
+        const status = parseInt(row.status_code);
+        const key = status === 0 ? `0|${row.error_type || 'unknown'}` : String(status);
+        counts[key] = (counts[key] || 0) + (parseInt(row.count) || 0);
+    });
+    return counts;
+}
+
 function updateStatusCodesTable(filterType = null) {
     const tbody = document.getElementById('statusCodesTableBody');
     if (!tbody) return;
 
     // Count status codes, respecting current filter
-    const statusCounts = {};
+    let statusCounts = getAggregateStatusCounts(filterType);
     let filteredUrls = crawlState.urls;
+    let totalUrls = 0;
 
-    // Apply filter if specified
-    if (filterType === 'internal') {
-        filteredUrls = crawlState.urls.filter(url => isInternalURL(url.url));
-    } else if (filterType === 'external') {
-        filteredUrls = crawlState.urls.filter(url => !isInternalURL(url.url));
-    } else if (filterType === '2xx') {
-        filteredUrls = crawlState.urls.filter(url => {
-            const status = parseInt(url.status_code);
-            return status >= 200 && status < 300;
+    if (statusCounts) {
+        totalUrls = Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
+    } else {
+        statusCounts = {};
+
+        // Apply filter if specified
+        if (filterType === 'internal') {
+            filteredUrls = crawlState.urls.filter(url => isInternalURL(url.url));
+        } else if (filterType === 'external') {
+            filteredUrls = crawlState.urls.filter(url => !isInternalURL(url.url));
+        } else if (filterType === '2xx') {
+            filteredUrls = crawlState.urls.filter(url => {
+                const status = parseInt(url.status_code);
+                return status >= 200 && status < 300;
+            });
+        } else if (filterType === '3xx') {
+            filteredUrls = crawlState.urls.filter(url => {
+                const status = parseInt(url.status_code);
+                return status >= 300 && status < 400;
+            });
+        } else if (filterType === '4xx') {
+            filteredUrls = crawlState.urls.filter(url => {
+                const status = parseInt(url.status_code);
+                return status >= 400 && status < 500;
+            });
+        } else if (filterType === '5xx') {
+            filteredUrls = crawlState.urls.filter(url => {
+                const status = parseInt(url.status_code);
+                return status >= 500;
+            });
+        } else if (filterType === 'no_response') {
+            filteredUrls = crawlState.urls.filter(url =>
+                (url.status_code === 0 || url.status_code === null || url.status_code === undefined)
+                && url.error_type !== 'file_too_large'
+            );
+        } else if (filterType === 'html') {
+            filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('html'));
+        } else if (filterType === 'css') {
+            filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('css'));
+        } else if (filterType === 'js') {
+            filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('javascript'));
+        } else if (filterType === 'images') {
+            filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('image'));
+        }
+
+        totalUrls = filteredUrls.length;
+
+        filteredUrls.forEach(url => {
+            // Group status_code=0 rows by error_type so DNS / timeout / refused
+            // show as distinct rows instead of collapsing into a single "0".
+            const isZero = url.status_code === 0 || url.status_code === null || url.status_code === undefined;
+            const key = isZero ? `0|${url.error_type || 'unknown'}` : String(url.status_code);
+            statusCounts[key] = (statusCounts[key] || 0) + 1;
         });
-    } else if (filterType === '3xx') {
-        filteredUrls = crawlState.urls.filter(url => {
-            const status = parseInt(url.status_code);
-            return status >= 300 && status < 400;
-        });
-    } else if (filterType === '4xx') {
-        filteredUrls = crawlState.urls.filter(url => {
-            const status = parseInt(url.status_code);
-            return status >= 400 && status < 500;
-        });
-    } else if (filterType === '5xx') {
-        filteredUrls = crawlState.urls.filter(url => {
-            const status = parseInt(url.status_code);
-            return status >= 500;
-        });
-    } else if (filterType === 'no_response') {
-        filteredUrls = crawlState.urls.filter(url =>
-            (url.status_code === 0 || url.status_code === null || url.status_code === undefined)
-            && url.error_type !== 'file_too_large'
-        );
-    } else if (filterType === 'html') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('html'));
-    } else if (filterType === 'css') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('css'));
-    } else if (filterType === 'js') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('javascript'));
-    } else if (filterType === 'images') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('image'));
     }
-
-    let totalUrls = filteredUrls.length;
-
-    filteredUrls.forEach(url => {
-        // Group status_code=0 rows by error_type so DNS / timeout / refused
-        // show as distinct rows instead of collapsing into a single "0".
-        const isZero = url.status_code === 0 || url.status_code === null || url.status_code === undefined;
-        const key = isZero ? `0|${url.error_type || 'unknown'}` : String(url.status_code);
-        statusCounts[key] = (statusCounts[key] || 0) + 1;
-    });
 
     // Clear existing rows
     tbody.innerHTML = '';
