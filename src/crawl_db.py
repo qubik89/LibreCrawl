@@ -12,6 +12,7 @@ from contextlib import contextmanager
 # Database file location (same as auth database) - stored in data/ for Docker volume persistence
 import os
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
+QUEUE_DIR = os.path.join(os.path.dirname(DB_FILE), 'crawl_queues')
 
 @contextmanager
 def get_db():
@@ -409,23 +410,28 @@ def save_checkpoint(crawl_id, checkpoint_data):
 def replace_crawl_queue(crawl_id, queue_items):
     """Replace persisted pending queue for a crawl."""
     try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM crawl_queue WHERE crawl_id = ?', (crawl_id,))
-            cursor.executemany('''
-                INSERT OR IGNORE INTO crawl_queue (crawl_id, url, depth, priority)
-                VALUES (?, ?, ?, ?)
-            ''', [
-                (crawl_id, url, int(depth or 0), index)
-                for index, (url, depth) in enumerate(queue_items or [])
-            ])
-            return True
+        os.makedirs(QUEUE_DIR, exist_ok=True)
+        path = os.path.join(QUEUE_DIR, f'{int(crawl_id)}.jsonl')
+        tmp_path = f'{path}.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as handle:
+            for url, depth in queue_items or []:
+                handle.write(json.dumps([url, int(depth or 0)], separators=(',', ':')) + '\n')
+        os.replace(tmp_path, path)
+        return True
     except Exception as e:
         print(f"Error saving crawl queue: {e}")
         return False
 
 def load_crawl_queue(crawl_id):
     """Load persisted pending queue for a crawl."""
+    path = os.path.join(QUEUE_DIR, f'{int(crawl_id)}.jsonl')
+    if os.path.exists(path):
+        try:
+            with open(path, encoding='utf-8') as handle:
+                return [tuple(json.loads(line)) for line in handle if line.strip()]
+        except Exception as e:
+            print(f"Error loading crawl queue file: {e}")
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
