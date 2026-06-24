@@ -44,23 +44,6 @@ services:
       # Add this for correct links in the verification emails
       # - MAIN_APP_URL=${MAIN_APP_URL}
     restart: unless-stopped
-    command: >
-      sh -c "
-      FLAGS='';
-      if [ \"$$LOCAL_MODE\" = \"true\" ]; then
-        FLAGS=\"$$FLAGS --local\";
-      fi;
-      if [ \"$$REGISTRATION_DISABLED\" = \"true\" ]; then
-        FLAGS=\"$$FLAGS --disable-register\";
-      fi;
-      if [ \"$$DEMO_MODE\" = \"true\" ]; then
-        FLAGS=\"$$FLAGS --demo\";
-      fi;
-      if [ \"$$DANGEROUSLY_SKIP_AUTH\" = \"true\" ]; then
-        FLAGS=\"$$FLAGS --dangerously-skip-auth\";
-      fi;
-      python main.py $$FLAGS"
-
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
 
