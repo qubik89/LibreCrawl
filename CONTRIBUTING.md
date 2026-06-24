@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for considering contributing to LibreCrawl. Here's how you can help.
+Thanks for considering contributing to Mitmore SEO Crawl. Here's how you can help.
 
 ## Ways to contribute
 

@@ -83,7 +83,7 @@ class ReportingSettingsTest(unittest.TestCase):
         reporting_settings.save_reporting_settings({
             'openrouter_api_key': 'sk-test',
             'default_model': 'openai/gpt-4.1',
-            'agency_name': 'LibreCrawl',
+            'agency_name': 'Mitmore SEO Crawl',
         })
         with reporting_settings.get_db() as conn:
             conn.execute(
@@ -104,7 +104,7 @@ class ReportingSettingsTest(unittest.TestCase):
         self.assertEqual(reporting_settings.get_reporting_setting('default_model'), 'openai/gpt-4.1')
 
         settings = reporting_settings.get_reporting_settings()
-        self.assertEqual(settings['agency_name'], 'LibreCrawl')
+        self.assertEqual(settings['agency_name'], 'Mitmore SEO Crawl')
         self.assertEqual(settings['footer_text'], None)
         self.assertNotIn('unexpected_key', settings)
 

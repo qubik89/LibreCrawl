@@ -94,7 +94,7 @@ def _branding(branding):
     if not HEX_COLOR_RE.match(str(primary_color)):
         primary_color = DEFAULT_PRIMARY_COLOR
     return {
-        'agency_name': branding.get('agency_name') or 'LibreCrawl',
+        'agency_name': branding.get('agency_name') or 'Mitmore SEO Crawl',
         'primary_color': primary_color,
         'footer_text': branding.get('footer_text'),
         'logo_path': _safe_logo_path(branding.get('logo_path')),

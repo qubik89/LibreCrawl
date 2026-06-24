@@ -156,7 +156,7 @@ async function openReportModal(crawlId) {
         setReportFieldValue('reportGenerateManualModel', settings.manual_model || '');
         setReportFieldValue('reportGenerateLanguage', settings.default_language || 'es-ES');
         setReportFieldValue('reportGenerateTone', settings.default_tone || 'executive');
-        setReportFieldValue('reportGenerateAgencyName', settings.agency_name || 'LibreCrawl');
+        setReportFieldValue('reportGenerateAgencyName', settings.agency_name || 'Mitmore SEO Crawl');
         setReportFieldValue('reportGeneratePrimaryColor', settings.primary_color || '#2563eb');
         setReportFieldValue('reportGenerateFooterText', settings.footer_text || '');
         setReportFieldValue('reportGenerateLogoPath', settings.logo_path || '');

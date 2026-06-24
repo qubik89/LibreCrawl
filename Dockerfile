@@ -41,20 +41,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install-deps
 
 # Create a non-root user to run the application
-RUN groupadd -r librecrawl && useradd -r -g librecrawl -u 1000 librecrawl \
-    && mkdir -p /home/librecrawl && chown -R librecrawl:librecrawl /home/librecrawl
+RUN groupadd -r mitmore_seo_crawl && useradd -r -g mitmore_seo_crawl -u 1000 mitmore_seo_crawl \
+    && mkdir -p /home/mitmore_seo_crawl && chown -R mitmore_seo_crawl:mitmore_seo_crawl /home/mitmore_seo_crawl
 
 # Copy application code
-COPY --chown=librecrawl:librecrawl . .
+COPY --chown=mitmore_seo_crawl:mitmore_seo_crawl . .
 
 # Create directory for user database if it doesn't exist
-RUN mkdir -p /app/data && chown -R librecrawl:librecrawl /app/data
+RUN mkdir -p /app/data && chown -R mitmore_seo_crawl:mitmore_seo_crawl /app/data
 
 # Change ownership of the entire app directory
-RUN chown -R librecrawl:librecrawl /app
+RUN chown -R mitmore_seo_crawl:mitmore_seo_crawl /app
 
-# Install all Playwright browsers as non-root user (installs to /home/librecrawl/.cache/ms-playwright)
-RUN gosu librecrawl playwright install
+# Install all Playwright browsers as non-root user (installs to /home/mitmore_seo_crawl/.cache/ms-playwright)
+RUN gosu mitmore_seo_crawl playwright install
 
 # Expose Flask port
 EXPOSE 5000
@@ -63,9 +63,9 @@ EXPOSE 5000
 ENV FLASK_APP=main.py
 ENV PYTHONUNBUFFERED=1
 
-COPY docker-entrypoint.sh /usr/local/bin/librecrawl-entrypoint
-RUN chmod +x /usr/local/bin/librecrawl-entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/mitmore-seo-crawl-entrypoint
+RUN chmod +x /usr/local/bin/mitmore-seo-crawl-entrypoint
 
 # Run the application
-ENTRYPOINT ["librecrawl-entrypoint"]
+ENTRYPOINT ["mitmore-seo-crawl-entrypoint"]
 CMD ["python", "main.py"]

@@ -19,7 +19,7 @@ def _setting(name, default=''):
 
 
 def _db_name():
-    return _setting('CLICKHOUSE_DATABASE', 'librecrawl')
+    return _setting('CLICKHOUSE_DATABASE', 'mitmore_seo_crawl')
 
 
 def _table(name):

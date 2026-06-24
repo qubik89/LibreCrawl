@@ -41,7 +41,7 @@
 
 - [x] Add a `clickhouse` service using the official ClickHouse image.
 - [x] Add persistent volumes for `/var/lib/clickhouse` and `/var/log/clickhouse-server`.
-- [x] Add `CLICKHOUSE_*` env vars to `librecrawl`.
+- [x] Add `CLICKHOUSE_*` env vars to `mitmore_seo_crawl`.
 
 ### Task 4: Verify and Deploy
 
@@ -50,6 +50,6 @@
 - `python3 -m unittest tests/test_crawl_jobs.py tests/test_crawl_clickhouse.py`
 - `node --check web/static/js/app.js && node --check web/static/js/dashboard.js`
 
-- [ ] Commit and push to `qubik89/LibreCrawl:server-crawl-jobs`.
+- [ ] Commit and push to `qubik89/mitmore-seo-crawl:server-crawl-jobs`.
 - [ ] Switch Coolify app to Docker Compose only after confirming storage behavior.
 - [ ] Trigger deploy and verify `/login` and `/api/crawls/<id>/status`.

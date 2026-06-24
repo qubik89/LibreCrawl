@@ -1,5 +1,5 @@
 /**
- * LibreCrawl Plugin Loader
+ * Mitmore SEO Crawl Plugin Loader
  * Automatically discovers and loads plugins from /static/plugins/
  */
 
@@ -77,7 +77,7 @@ class PluginLoader {
     }
 
     /**
-     * Register a plugin (called by plugin files via LibreCrawlPlugin.register())
+     * Register a plugin (called by plugin files via MitmoreSEOCrawlPlugin.register())
      */
     registerPlugin(pluginConfig) {
         // Validate required fields
@@ -368,7 +368,7 @@ class PluginLoader {
 }
 
 // Global plugin API
-window.LibreCrawlPlugin = {
+window.MitmoreSEOCrawlPlugin = {
     loader: new PluginLoader(),
 
     /**
@@ -387,4 +387,4 @@ window.LibreCrawlPlugin = {
     }
 };
 
-console.log('🔌 LibreCrawl Plugin System loaded');
+console.log('🔌 Mitmore SEO Crawl Plugin System loaded');

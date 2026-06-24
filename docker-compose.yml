@@ -1,7 +1,7 @@
 services:
-  librecrawl:
+  mitmore-seo-crawl:
     build: .
-    container_name: librecrawl
+    container_name: mitmore-seo-crawl
     depends_on:
       - clickhouse
     expose:
@@ -28,7 +28,7 @@ services:
       - CLICKHOUSE_ENABLED=${CLICKHOUSE_ENABLED:-true}
       - CLICKHOUSE_HOST=${CLICKHOUSE_HOST:-clickhouse}
       - CLICKHOUSE_PORT=${CLICKHOUSE_PORT:-8123}
-      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-librecrawl}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE:-mitmore_seo_crawl}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE:-false}
@@ -64,10 +64,10 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
-    container_name: librecrawl-clickhouse
+    container_name: mitmore-seo-crawl-clickhouse
     restart: unless-stopped
     environment:
-      - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-librecrawl}
+      - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-mitmore_seo_crawl}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1

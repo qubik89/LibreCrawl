@@ -4,17 +4,17 @@ echo Checking for Docker...
 docker --version 2>nul
 if errorlevel 1 goto nodocker
 
-echo Docker found! Starting LibreCrawl...
+echo Docker found! Starting Mitmore SEO Crawl...
 docker compose up -d
 timeout /t 3 /nobreak >nul
 
 echo.
 echo ================================================================================
-echo LibreCrawl is running!
+echo Mitmore SEO Crawl is running!
 echo Opening browser to http://localhost:5000
 echo.
-echo Press Ctrl+C to stop LibreCrawl
-echo DO NOT close this window or LibreCrawl will keep running!
+echo Press Ctrl+C to stop Mitmore SEO Crawl
+echo DO NOT close this window or Mitmore SEO Crawl will keep running!
 echo ================================================================================
 echo.
 
@@ -34,7 +34,7 @@ pip show flask 2>nul
 if errorlevel 1 goto installdeps
 
 :rundirect
-echo Starting LibreCrawl...
+echo Starting Mitmore SEO Crawl...
 start /b cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:5000"
 python main.py -l
 exit /b

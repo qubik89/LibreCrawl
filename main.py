@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
+parser = argparse.ArgumentParser(description='Mitmore SEO Crawl - SEO Spider Tool')
 parser.add_argument('--local', '-l', action='store_true',
                     help='Run in local mode (all users get admin tier, no rate limits)')
 parser.add_argument('--disable-register', '-dr', action='store_true',
@@ -713,7 +713,7 @@ def generate_json_export(urls, fields):
 
 def generate_xml_export(urls, fields):
     """Generate XML export content"""
-    root = ET.Element('librecrawl_export')
+    root = ET.Element('mitmore_seo_crawl_export')
     root.set('export_date', time.strftime('%Y-%m-%d %H:%M:%S'))
     root.set('total_urls', str(len(urls)))
 
@@ -873,7 +873,7 @@ def verify_email():
     redirect_url = None
     if success:
         if app_source == 'workshop':
-            redirect_url = os.getenv('WORKSHOP_APP_URL', 'https://workshop.librecrawl.com')
+            redirect_url = os.getenv('WORKSHOP_APP_URL', 'https://workshop.mitmore.dev')
         else:
             redirect_url = url_for('login_page')
 
@@ -1215,7 +1215,7 @@ def download_report(report_id):
             pdf_path,
             mimetype='application/pdf',
             as_attachment=True,
-            download_name=f'librecrawl-report-{report_id}.pdf',
+            download_name=f'mitmore-seo-crawl-report-{report_id}.pdf',
         )
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2045,15 +2045,15 @@ def export_data():
             if export_format == 'csv':
                 issues_content = generate_issues_csv_export(issues)
                 issues_mimetype = 'text/csv'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+                issues_filename = f'mitmore_seo_crawl_issues_{int(time.time())}.csv'
             elif export_format == 'json':
                 issues_content = generate_issues_json_export(issues)
                 issues_mimetype = 'application/json'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.json'
+                issues_filename = f'mitmore_seo_crawl_issues_{int(time.time())}.json'
             else:
                 issues_content = generate_issues_csv_export(issues)
                 issues_mimetype = 'text/csv'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+                issues_filename = f'mitmore_seo_crawl_issues_{int(time.time())}.csv'
 
             files_to_export.append({
                 'content': issues_content,
@@ -2066,15 +2066,15 @@ def export_data():
             if export_format == 'csv':
                 links_content = generate_links_csv_export(links)
                 links_mimetype = 'text/csv'
-                links_filename = f'librecrawl_links_{int(time.time())}.csv'
+                links_filename = f'mitmore_seo_crawl_links_{int(time.time())}.csv'
             elif export_format == 'json':
                 links_content = generate_links_json_export(links)
                 links_mimetype = 'application/json'
-                links_filename = f'librecrawl_links_{int(time.time())}.json'
+                links_filename = f'mitmore_seo_crawl_links_{int(time.time())}.json'
             else:
                 links_content = generate_links_csv_export(links)
                 links_mimetype = 'text/csv'
-                links_filename = f'librecrawl_links_{int(time.time())}.csv'
+                links_filename = f'mitmore_seo_crawl_links_{int(time.time())}.csv'
 
             files_to_export.append({
                 'content': links_content,
@@ -2087,15 +2087,15 @@ def export_data():
             if export_format == 'csv':
                 regular_content = generate_csv_export(urls, regular_fields)
                 regular_mimetype = 'text/csv'
-                regular_filename = f'librecrawl_export_{int(time.time())}.csv'
+                regular_filename = f'mitmore_seo_crawl_export_{int(time.time())}.csv'
             elif export_format == 'json':
                 regular_content = generate_json_export(urls, regular_fields)
                 regular_mimetype = 'application/json'
-                regular_filename = f'librecrawl_export_{int(time.time())}.json'
+                regular_filename = f'mitmore_seo_crawl_export_{int(time.time())}.json'
             elif export_format == 'xml':
                 regular_content = generate_xml_export(urls, regular_fields)
                 regular_mimetype = 'application/xml'
-                regular_filename = f'librecrawl_export_{int(time.time())}.xml'
+                regular_filename = f'mitmore_seo_crawl_export_{int(time.time())}.xml'
             else:
                 return jsonify({'success': False, 'error': 'Unsupported export format'})
 
@@ -2221,7 +2221,7 @@ def main():
     start_cleanup_thread()
 
     print("=" * 60)
-    print("LibreCrawl - SEO Spider")
+    print("Mitmore SEO Crawl - SEO Spider")
     print("=" * 60)
     print(f"\n🚀 Server starting on http://0.0.0.0:5000")
     print(f"🌐 Access from browser: http://localhost:5000")
@@ -2241,7 +2241,7 @@ def main():
 
     # Run Flask server with Waitress (production-grade WSGI server)
     from waitress import serve
-    print("Starting LibreCrawl on http://localhost:5000")
+    print("Starting Mitmore SEO Crawl on http://localhost:5000")
     print("Using Waitress WSGI server with multi-threading support")
     serve(app, host='0.0.0.0', port=5000, threads=8)
 

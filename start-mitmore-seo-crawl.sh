@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# Start LibreCrawl - tries Docker first, falls back to Python
+# Start Mitmore SEO Crawl - tries Docker first, falls back to Python
 
 echo "Checking for Docker..."
 if command -v docker &> /dev/null && command -v docker compose &> /dev/null; then
-    echo "Docker found! Starting LibreCrawl with Docker..."
+    echo "Docker found! Starting Mitmore SEO Crawl with Docker..."
     docker compose up -d
 
     # Wait for the service to be ready
-    echo "Waiting for LibreCrawl to start..."
+    echo "Waiting for Mitmore SEO Crawl to start..."
     sleep 3
 
     # Check if container is running
-    if docker ps | grep -q librecrawl; then
+    if docker ps --format '{{.Names}}' | grep -qx mitmore-seo-crawl; then
         echo ""
         echo "================================================================================"
-        echo "LibreCrawl is running!"
+        echo "Mitmore SEO Crawl is running!"
         echo "Opening browser to http://127.0.0.1:5000"
         echo ""
-        echo "Press Ctrl+C to stop LibreCrawl and exit"
-        echo "DO NOT close this terminal or LibreCrawl will keep running in the background!"
+        echo "Press Ctrl+C to stop Mitmore SEO Crawl and exit"
+        echo "DO NOT close this terminal or Mitmore SEO Crawl will keep running in the background!"
         echo "================================================================================"
         echo ""
 
@@ -33,14 +33,14 @@ if command -v docker &> /dev/null && command -v docker compose &> /dev/null; the
         fi
 
         # Trap Ctrl+C to gracefully shutdown
-        trap 'echo ""; echo "Stopping LibreCrawl..."; docker compose down; exit 0' INT
+        trap 'echo ""; echo "Stopping Mitmore SEO Crawl..."; docker compose down; exit 0' INT
 
         # Keep terminal open and show logs
         echo "Showing live logs (press Ctrl+C to stop):"
         echo ""
         docker compose logs -f
     else
-        echo "Error: LibreCrawl container failed to start"
+        echo "Error: Mitmore SEO Crawl container failed to start"
         docker compose logs
         exit 1
     fi
@@ -80,8 +80,8 @@ else
         playwright install chromium
     fi
 
-    # Run LibreCrawl with Python in local mode
-    echo "Starting LibreCrawl in local mode..."
+    # Run Mitmore SEO Crawl with Python in local mode
+    echo "Starting Mitmore SEO Crawl in local mode..."
     echo "Opening browser to http://127.0.0.1:5000"
 
     # Open browser after 2 seconds (give Flask time to start)

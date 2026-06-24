@@ -47,7 +47,7 @@ The model refresh endpoint fetches `https://openrouter.ai/api/v1/models` and kee
 
 The cache stores `id`, `name`, `provider`, `context_length`, `pricing`, `supported_parameters`, and `fetched_at`.
 
-When generating, LibreCrawl constructs a base request with `model` and `messages`, then only includes optional parameters present in `supported_parameters`. If the user provides a manual model and there is no cached metadata, the request uses the minimum payload: `model`, `messages`, and `max_tokens`.
+When generating, Mitmore SEO Crawl constructs a base request with `model` and `messages`, then only includes optional parameters present in `supported_parameters`. If the user provides a manual model and there is no cached metadata, the request uses the minimum payload: `model`, `messages`, and `max_tokens`.
 
 Reasoning is sent only when the model supports `reasoning`. Temperature is sent only when the model supports `temperature`. Structured JSON is requested only when `response_format` or `structured_outputs` is supported.
 
@@ -63,7 +63,7 @@ Each finding includes severity, impact area, confidence, affected URL count, exa
 
 ## PDF Rendering
 
-LibreCrawl already ships Playwright and browser dependencies. V1 uses Playwright Chromium PDF generation instead of adding WeasyPrint or ReportLab.
+Mitmore SEO Crawl already ships Playwright and browser dependencies. V1 uses Playwright Chromium PDF generation instead of adding WeasyPrint or ReportLab.
 
 The PDF renderer:
 - Converts Markdown to HTML using the existing `markdown` dependency.

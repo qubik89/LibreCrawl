@@ -9,7 +9,7 @@ let defaultSettings = {
     crawlExternalLinks: false,
 
     // Request settings
-    userAgent: 'LibreCrawl/1.0 (Web Crawler)',
+    userAgent: 'MitmoreSEOCrawl/1.0 (Web Crawler)',
     timeout: 10,
     retries: 3,
     acceptLanguage: 'en-US,en;q=0.9',
@@ -49,7 +49,7 @@ let defaultSettings = {
     jsTimeout: 30,
     jsBrowser: 'chromium',
     jsHeadless: true,
-    jsUserAgent: 'LibreCrawl/1.0 (Web Crawler with JavaScript)',
+    jsUserAgent: 'MitmoreSEOCrawl/1.0 (Web Crawler with JavaScript)',
     jsViewportWidth: 1920,
     jsViewportHeight: 1080,
     jsMaxConcurrentPages: 3,
@@ -273,7 +273,7 @@ const defaultReportSettings = {
     manual_model: '',
     default_language: 'es-ES',
     default_tone: 'executive',
-    agency_name: 'LibreCrawl',
+    agency_name: 'Mitmore SEO Crawl',
     primary_color: '#2563eb',
     footer_text: '',
     logo_path: '',
@@ -524,7 +524,7 @@ async function saveSettings() {
 
     // Save to localStorage first (primary storage for persistence)
     try {
-        localStorage.setItem('librecrawl_settings', JSON.stringify(newSettings));
+        localStorage.setItem('mitmore_seo_crawl_settings', JSON.stringify(newSettings));
         console.log('Settings saved to localStorage');
     } catch (error) {
         console.error('Failed to save to localStorage:', error);
@@ -573,7 +573,7 @@ function resetSettings() {
 
         // Clear localStorage
         try {
-            localStorage.removeItem('librecrawl_settings');
+            localStorage.removeItem('mitmore_seo_crawl_settings');
             console.log('Settings cleared from localStorage');
         } catch (error) {
             console.error('Failed to clear localStorage:', error);
@@ -684,7 +684,7 @@ function validateSettings(settings) {
 function loadSettings() {
     // Try to load from localStorage first (browser-specific persistence)
     try {
-        const savedSettings = localStorage.getItem('librecrawl_settings');
+        const savedSettings = localStorage.getItem('mitmore_seo_crawl_settings');
         if (savedSettings) {
             const parsed = JSON.parse(savedSettings);
             currentSettings = { ...defaultSettings, ...parsed };
@@ -708,7 +708,7 @@ function loadSettings() {
             if (data.success) {
                 currentSettings = { ...defaultSettings, ...data.settings };
                 // Save to localStorage for future loads
-                localStorage.setItem('librecrawl_settings', JSON.stringify(currentSettings));
+                localStorage.setItem('mitmore_seo_crawl_settings', JSON.stringify(currentSettings));
                 // Apply custom CSS after loading settings
                 applyCustomCSS();
             } else {
@@ -793,7 +793,7 @@ function populateReportSettingsForm() {
     setElementValue('reportManualModel', reportSettings.manual_model);
     setElementValue('reportDefaultLanguage', reportSettings.default_language || 'es-ES');
     setElementValue('reportDefaultTone', reportSettings.default_tone || 'executive');
-    setElementValue('reportAgencyName', reportSettings.agency_name || 'LibreCrawl');
+    setElementValue('reportAgencyName', reportSettings.agency_name || 'Mitmore SEO Crawl');
     setElementValue('reportPrimaryColor', reportSettings.primary_color || '#2563eb');
     setElementValue('reportFooterText', reportSettings.footer_text || '');
     setElementValue('reportLogoPath', reportSettings.logo_path || '');
@@ -941,7 +941,7 @@ function exportSettings() {
     const url = URL.createObjectURL(settingsBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'librecrawl-settings.json';
+    a.download = 'mitmore-seo-crawl-settings.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
