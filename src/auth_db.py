@@ -105,6 +105,12 @@ def init_db():
     from src.crawl_db import init_crawl_tables
     init_crawl_tables()
 
+    # Initialize AI report settings, model cache, and report job tables
+    from src.reporting_settings import init_reporting_tables
+    from src.reporting_jobs import init_report_job_tables
+    init_reporting_tables()
+    init_report_job_tables()
+
 def hash_password(password):
     """Hash a password with bcrypt"""
     salt = bcrypt.gensalt()

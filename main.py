@@ -11,7 +11,7 @@ import string
 import os
 from io import StringIO
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
 from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
@@ -317,6 +317,259 @@ def build_crawl_summary(crawl_id):
         'counts': counts,
         'analytics': analytics,
     }
+
+REPORT_SETTING_FIELDS = (
+    'openrouter_api_key',
+    'default_model',
+    'manual_model',
+    'default_tone',
+    'default_language',
+    'agency_name',
+    'primary_color',
+    'footer_text',
+    'logo_path',
+)
+
+REPORT_BRANDING_FIELDS = ('agency_name', 'primary_color', 'footer_text', 'logo_path')
+REPORT_LANGUAGES = {'es-ES', 'en'}
+REPORT_TONES = {'executive', 'technical', 'commercial'}
+REPORT_MODEL_PREFIXES = ('openai/', 'anthropic/', 'deepseek/')
+REPORT_MAX_FIELD_LENGTH = 500
+
+
+def mask_openrouter_api_key(api_key):
+    """Return a non-sensitive display value for an OpenRouter key."""
+    if not api_key:
+        return ''
+    api_key = str(api_key)
+    if len(api_key) <= 8:
+        return '********'
+    return f'{api_key[:4]}...{api_key[-4:]}'
+
+
+def public_report_settings(settings):
+    """Return report settings without exposing the stored API key."""
+    public = dict(settings or {})
+    api_key = public.pop('openrouter_api_key', None)
+    public['openrouter_api_key'] = ''
+    public['has_openrouter_api_key'] = bool(api_key)
+    public['masked_openrouter_api_key'] = mask_openrouter_api_key(api_key)
+    return public
+
+
+def report_settings_update_from_payload(payload):
+    """Build a save dict while preserving a blank/missing API key."""
+    payload = payload or {}
+    update = {}
+    for field in REPORT_SETTING_FIELDS:
+        if field not in payload:
+            continue
+        value = payload.get(field)
+        if field == 'openrouter_api_key' and not str(value or '').strip():
+            continue
+        update[field] = normalize_report_setting(field, value)
+    return update
+
+
+def request_json_object():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        raise ValueError('JSON body must be an object')
+    return payload
+
+
+def _first_nonblank(*values):
+    for value in values:
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
+def resolve_report_request_options(payload, settings):
+    """Merge per-report overrides with saved report settings."""
+    payload = payload or {}
+    settings = settings or {}
+    language = normalize_report_language(_first_nonblank(payload.get('language'), settings.get('default_language')) or 'es-ES')
+    tone = normalize_report_tone(_first_nonblank(payload.get('tone'), settings.get('default_tone')) or 'executive')
+    model = _first_nonblank(
+        payload.get('manual_model'),
+        payload.get('model'),
+        payload.get('default_model'),
+        settings.get('manual_model'),
+        settings.get('default_model'),
+    )
+    model = normalize_report_model(model) if model else None
+    branding = {
+        field: _first_nonblank(payload.get(field), settings.get(field))
+        for field in REPORT_BRANDING_FIELDS
+    }
+    return {
+        'language': language,
+        'tone': tone,
+        'model': model,
+        'branding': branding,
+        'openrouter_api_key': settings.get('openrouter_api_key'),
+    }
+
+
+def normalize_report_setting(field, value):
+    """Normalize and validate one report setting value."""
+    if value is None:
+        return ''
+    value = str(value).strip()
+    if len(value) > REPORT_MAX_FIELD_LENGTH and field != 'openrouter_api_key':
+        raise ValueError(f'{field} is too long')
+    if field == 'default_language':
+        return normalize_report_language(value)
+    if field == 'default_tone':
+        return normalize_report_tone(value)
+    if field in ('default_model', 'manual_model') and value:
+        return normalize_report_model(value)
+    return value
+
+
+def normalize_report_language(language):
+    if language not in REPORT_LANGUAGES:
+        raise ValueError('Unsupported report language')
+    return language
+
+
+def normalize_report_tone(tone):
+    if tone not in REPORT_TONES:
+        raise ValueError('Unsupported report tone')
+    return tone
+
+
+def normalize_report_model(model):
+    model = str(model or '').strip()
+    if not model or len(model) > 200 or any(ch.isspace() for ch in model):
+        raise ValueError('Invalid report model')
+    if not model.startswith(REPORT_MODEL_PREFIXES):
+        raise ValueError('Unsupported report model provider')
+    return model
+
+
+def current_user_can_use_reports():
+    """Reports use a shared OpenRouter key, so only admins can manage/run them."""
+    return session.get('user_id') is not None and session.get('tier') == 'admin'
+
+
+def report_feature_forbidden():
+    return jsonify({'success': False, 'error': 'Reports require an admin account'}), 403
+
+
+def combine_report_usage(*usage_items):
+    """Keep per-call usage and sum numeric token counters."""
+    calls = [usage for usage in usage_items if usage]
+    totals = {}
+    for usage in calls:
+        for key, value in usage.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[key] = totals.get(key, 0) + value
+    return {'calls': calls, 'total': totals} if calls else None
+
+
+def report_access_context(report_id, user_id, session_id):
+    """Return (job, crawl, allowed) for report endpoints."""
+    from src.reporting_jobs import get_report_job
+    from src.crawl_db import get_crawl_by_id
+
+    job = get_report_job(report_id)
+    if not job:
+        return None, None, False
+    crawl = get_crawl_by_id(job.get('crawl_id'))
+    return job, crawl, user_can_access_crawl(crawl, user_id, session_id)
+
+
+def public_report_job(job):
+    """Return report job fields safe for API responses."""
+    if not job:
+        return None
+    return {
+        'id': job.get('id'),
+        'crawl_id': job.get('crawl_id'),
+        'status': job.get('status'),
+        'language': job.get('language'),
+        'tone': job.get('tone'),
+        'model': job.get('model'),
+        'error': job.get('error') if job.get('status') == 'failed' else None,
+        'created_at': job.get('created_at'),
+        'updated_at': job.get('updated_at'),
+        'completed_at': job.get('completed_at'),
+        'usage': job.get('usage'),
+        'has_pdf': bool(job.get('pdf_path')),
+    }
+
+
+def safe_report_pdf_path(job):
+    """Return a verified report PDF path from a report job."""
+    from pathlib import Path
+    from src.reporting_pdf import DEFAULT_REPORTS_BASE_DIR
+
+    if not job or not job.get('pdf_path'):
+        return None
+    path = Path(job['pdf_path']).resolve()
+    base = DEFAULT_REPORTS_BASE_DIR.resolve()
+    try:
+        if not path.is_relative_to(base):
+            return None
+    except AttributeError:
+        if base not in path.parents and path != base:
+            return None
+    return path
+
+
+def run_report_job(report_id, crawl_id, options):
+    """Generate one report in a background worker."""
+    from src.reporting_jobs import update_report_job
+
+    try:
+        update_report_job(report_id, status='running')
+
+        from src.openrouter_client import (
+            OpenRouterClient,
+            generate_report_markdown,
+            generate_structured_findings,
+        )
+        from src.reporting_data import build_audit_packet
+        from src.reporting_pdf import render_report_html, render_report_pdf, report_output_paths
+        from src.reporting_prompts import get_prompt_bundle
+        from src.reporting_settings import get_openrouter_model
+
+        model = options['model']
+        audit_packet = build_audit_packet(crawl_id)
+        prompt_bundle = get_prompt_bundle(options['language'], options['tone'])
+        model_metadata = get_openrouter_model(model)
+        client = OpenRouterClient(options['openrouter_api_key'])
+
+        findings, findings_usage = generate_structured_findings(
+            client, model, audit_packet, prompt_bundle, model_metadata
+        )
+        markdown_text, report_usage = generate_report_markdown(
+            client, model, audit_packet, findings, prompt_bundle, model_metadata
+        )
+
+        paths = report_output_paths(crawl_id, report_id)
+        paths['dir'].mkdir(parents=True, exist_ok=True)
+        paths['markdown'].write_text(markdown_text, encoding='utf-8')
+        html = render_report_html(
+            markdown_text,
+            options.get('branding'),
+            audit_packet.get('crawl_metadata') or {},
+        )
+        paths['html'].write_text(html, encoding='utf-8')
+        render_report_pdf(html, paths['pdf'])
+
+        update_report_job(
+            report_id,
+            status='completed',
+            markdown_path=str(paths['markdown']),
+            html_path=str(paths['html']),
+            pdf_path=str(paths['pdf']),
+            usage=combine_report_usage(findings_usage, report_usage),
+        )
+    except Exception as exc:
+        update_report_job(report_id, status='failed', error=str(exc))
 
 def get_or_create_crawler():
     """Get or create a crawler instance for the current session"""
@@ -790,6 +1043,182 @@ def dashboard():
 def debug_memory_page():
     """Debug page with nice UI for memory monitoring"""
     return render_template('debug_memory.html')
+
+@app.route('/api/report-settings')
+@login_required
+def get_report_settings():
+    """Return report settings without exposing the OpenRouter API key."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.reporting_settings import get_reporting_settings
+
+        return jsonify({
+            'success': True,
+            'settings': public_report_settings(get_reporting_settings()),
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/report-settings', methods=['POST'])
+@login_required
+def save_report_settings():
+    """Save report settings, preserving a blank/missing API key."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.reporting_settings import get_reporting_settings, save_reporting_settings
+
+        payload = request_json_object()
+        update = report_settings_update_from_payload(payload)
+        if update:
+            save_reporting_settings(update)
+        return jsonify({
+            'success': True,
+            'settings': public_report_settings(get_reporting_settings()),
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/report-models')
+@login_required
+def get_report_models():
+    """Return cached OpenRouter models."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.reporting_settings import list_openrouter_models
+
+        return jsonify({'success': True, 'models': list_openrouter_models()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/report-models/refresh', methods=['POST'])
+@login_required
+def refresh_report_models():
+    """Refresh and cache OpenRouter models using a stored or posted key."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.openrouter_client import refresh_models
+        from src.reporting_settings import get_reporting_settings
+
+        payload = request_json_object()
+        settings = get_reporting_settings()
+        api_key = _first_nonblank(payload.get('openrouter_api_key'), settings.get('openrouter_api_key'))
+        if not api_key:
+            return jsonify({'success': False, 'error': 'OpenRouter API key is required'}), 400
+        return jsonify({'success': True, 'models': refresh_models(api_key)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/crawls/<int:crawl_id>/reports', methods=['POST'])
+@login_required
+def create_crawl_report(crawl_id):
+    """Queue an AI PDF report for a completed crawl."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.crawl_db import get_crawl_by_id
+        from src.reporting_jobs import create_report_job
+        from src.reporting_settings import get_reporting_settings
+
+        user_id = session.get('user_id')
+        session_id = ensure_session_id()
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        if crawl.get('status') != 'completed':
+            return jsonify({'success': False, 'error': 'Reports can only be generated for completed crawls'}), 400
+
+        payload = request_json_object()
+        options = resolve_report_request_options(payload, get_reporting_settings())
+        if not options.get('model'):
+            return jsonify({'success': False, 'error': 'Report model is required'}), 400
+        if not options.get('openrouter_api_key'):
+            return jsonify({'success': False, 'error': 'OpenRouter API key is required'}), 400
+
+        report_id = create_report_job(
+            crawl_id,
+            options['language'],
+            options['tone'],
+            options['model'],
+        )
+        worker = threading.Thread(
+            target=run_report_job,
+            args=(report_id, crawl_id, options),
+            daemon=True,
+        )
+        worker.start()
+        return jsonify({'success': True, 'report_id': report_id})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reports/<int:report_id>/status')
+@login_required
+def get_report_status(report_id):
+    """Return one report job after verifying crawl access."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        job, crawl, allowed = report_access_context(
+            report_id,
+            session.get('user_id'),
+            ensure_session_id(),
+        )
+        if not job:
+            return jsonify({'success': False, 'error': 'Report not found'}), 404
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not allowed:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        return jsonify({'success': True, 'report': public_report_job(job)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/reports/<int:report_id>/download')
+@login_required
+def download_report(report_id):
+    """Download a completed report PDF after verifying crawl access."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        job, crawl, allowed = report_access_context(
+            report_id,
+            session.get('user_id'),
+            ensure_session_id(),
+        )
+        if not job:
+            return jsonify({'success': False, 'error': 'Report not found'}), 404
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not allowed:
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        pdf_path = safe_report_pdf_path(job)
+        if job.get('status') != 'completed' or not pdf_path or not os.path.exists(pdf_path):
+            return jsonify({'success': False, 'error': 'Report PDF is not ready'}), 404
+        return send_file(
+            pdf_path,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'librecrawl-report-{report_id}.pdf',
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/start_crawl', methods=['POST'])
 @login_required
@@ -1724,6 +2153,17 @@ def recover_crashed_crawls():
     except Exception as e:
         print(f"Error during crash recovery: {e}")
 
+def recover_interrupted_report_jobs():
+    """Mark interrupted queued/running report jobs as failed on startup."""
+    try:
+        from src.reporting_jobs import mark_incomplete_jobs_failed
+
+        count = mark_incomplete_jobs_failed()
+        if count:
+            print(f"Marked {count} interrupted report job(s) as failed")
+    except Exception as e:
+        print(f"Error during report job recovery: {e}")
+
 def graceful_shutdown(signum, frame):
     """Save all active crawls before shutdown"""
     print("\n" + "=" * 60)
@@ -1775,6 +2215,7 @@ def main():
 
     # Recover any crashed crawls from previous session
     recover_crashed_crawls()
+    recover_interrupted_report_jobs()
 
     # Start cleanup thread for old crawler instances
     start_cleanup_thread()

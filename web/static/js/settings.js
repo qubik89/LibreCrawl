@@ -265,6 +265,22 @@ let defaultSettings = {
 *.min.css`
 };
 
+let reportSettings = {};
+let reportModels = [];
+let currentSettingsTier = 'guest';
+const defaultReportSettings = {
+    default_model: '',
+    manual_model: '',
+    default_language: 'es-ES',
+    default_tone: 'executive',
+    agency_name: 'LibreCrawl',
+    primary_color: '#2563eb',
+    footer_text: '',
+    logo_path: '',
+    has_openrouter_api_key: false,
+    masked_openrouter_api_key: ''
+};
+
 // Initialize settings when page loads
 document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
@@ -317,6 +333,7 @@ async function openSettings() {
         const data = await response.json();
         if (data.success) {
             userTier = data.user.tier;
+            currentSettingsTier = userTier;
         }
     } catch (error) {
         console.error('Failed to get user tier:', error);
@@ -332,7 +349,14 @@ async function openSettings() {
     applyTierRestrictions(userTier);
 
     // Load current settings into form
+    if (userTier === 'admin') {
+        await loadReportSettings();
+        await loadReportModels();
+    }
     populateSettingsForm();
+    if (userTier === 'admin') {
+        populateReportSettingsForm();
+    }
 
     // Show modal
     document.getElementById('settingsModal').style.display = 'flex';
@@ -350,7 +374,7 @@ function applyTierRestrictions(tier) {
         'guest': [],  // No settings tabs for guests
         'user': ['crawler', 'export', 'issues'],
         'extra': ['crawler', 'export', 'issues', 'filters', 'requests', 'customcss', 'javascript'],
-        'admin': ['crawler', 'requests', 'filters', 'export', 'javascript', 'issues', 'customcss', 'advanced']
+        'admin': ['crawler', 'requests', 'filters', 'export', 'javascript', 'issues', 'customcss', 'reports', 'advanced']
     };
 
     const allowedTabs = tierTabs[tier] || [];
@@ -487,7 +511,7 @@ function collectSettingsFromForm() {
     return settings;
 }
 
-function saveSettings() {
+async function saveSettings() {
     // Collect settings from form
     const newSettings = collectSettingsFromForm();
 
@@ -513,9 +537,11 @@ function saveSettings() {
     // Apply custom CSS immediately
     applyCustomCSS();
 
+    const reportSaveOk = await saveReportSettings();
+
     // Close settings modal
     closeSettings();
-    showNotification('Settings saved successfully', 'success');
+    showNotification(reportSaveOk ? 'Settings saved successfully' : 'Crawler settings saved; report settings failed', reportSaveOk ? 'success' : 'warning');
 
     // Sync to backend for crawler configuration
     fetch('/api/save_settings', {
@@ -710,6 +736,180 @@ function syncSettingsToBackend() {
     });
 }
 
+async function loadReportSettings() {
+    try {
+        const response = await fetch('/api/report-settings');
+        const data = await response.json();
+        if (data.success) {
+            reportSettings = { ...defaultReportSettings, ...data.settings };
+            populateReportSettingsForm();
+        }
+    } catch (error) {
+        console.warn('Failed to load report settings:', error);
+    }
+    return reportSettings;
+}
+
+async function loadReportModels() {
+    try {
+        const response = await fetch('/api/report-models');
+        const data = await response.json();
+        if (data.success) {
+            reportModels = data.models || [];
+            populateReportModelSelect('reportModelSelect', reportSettings.default_model);
+            populateReportModelSelect('reportGenerateModelSelect', reportSettings.default_model, true);
+        }
+    } catch (error) {
+        console.warn('Failed to load report models:', error);
+    }
+    return reportModels;
+}
+
+function reportNotice(message, type = 'info') {
+    if (typeof showNotification === 'function') {
+        showNotification(message, type);
+    } else {
+        alert(message);
+    }
+}
+
+function populateReportSettingsForm() {
+    const keyInput = document.getElementById('reportOpenRouterApiKey');
+    if (!keyInput) return;
+
+    keyInput.value = '';
+    keyInput.placeholder = reportSettings.has_openrouter_api_key
+        ? `Saved: ${reportSettings.masked_openrouter_api_key}`
+        : 'Paste OpenRouter API key';
+
+    const keyStatus = document.getElementById('reportOpenRouterKeyStatus');
+    if (keyStatus) {
+        keyStatus.textContent = reportSettings.has_openrouter_api_key
+            ? `Saved key: ${reportSettings.masked_openrouter_api_key}`
+            : 'No key saved';
+    }
+
+    populateReportModelSelect('reportModelSelect', reportSettings.default_model);
+    setElementValue('reportManualModel', reportSettings.manual_model);
+    setElementValue('reportDefaultLanguage', reportSettings.default_language || 'es-ES');
+    setElementValue('reportDefaultTone', reportSettings.default_tone || 'executive');
+    setElementValue('reportAgencyName', reportSettings.agency_name || 'LibreCrawl');
+    setElementValue('reportPrimaryColor', reportSettings.primary_color || '#2563eb');
+    setElementValue('reportFooterText', reportSettings.footer_text || '');
+    setElementValue('reportLogoPath', reportSettings.logo_path || '');
+}
+
+function setElementValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+        element.value = value;
+    }
+}
+
+function collectReportSettingsFromForm() {
+    return {
+        openrouter_api_key: document.getElementById('reportOpenRouterApiKey')?.value || '',
+        default_model: document.getElementById('reportModelSelect')?.value || '',
+        manual_model: document.getElementById('reportManualModel')?.value || '',
+        default_language: document.getElementById('reportDefaultLanguage')?.value || 'es-ES',
+        default_tone: document.getElementById('reportDefaultTone')?.value || 'executive',
+        agency_name: document.getElementById('reportAgencyName')?.value || '',
+        primary_color: document.getElementById('reportPrimaryColor')?.value || '#2563eb',
+        footer_text: document.getElementById('reportFooterText')?.value || '',
+        logo_path: document.getElementById('reportLogoPath')?.value || ''
+    };
+}
+
+async function saveReportSettings() {
+    if (currentSettingsTier !== 'admin') return true;
+    if (!document.getElementById('reportOpenRouterApiKey')) return true;
+
+    try {
+        const response = await fetch('/api/report-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collectReportSettingsFromForm())
+        });
+        const data = await response.json();
+        if (!data.success) {
+            reportNotice('Report settings failed: ' + (data.error || 'Unknown error'), 'error');
+            return false;
+        }
+        reportSettings = { ...defaultReportSettings, ...data.settings };
+        populateReportSettingsForm();
+        return true;
+    } catch (error) {
+        console.error('Error saving report settings:', error);
+        reportNotice('Report settings failed', 'error');
+        return false;
+    }
+}
+
+async function refreshReportModels() {
+    const button = document.getElementById('reportRefreshModelsBtn');
+    if (button) button.disabled = true;
+
+    try {
+        const openrouterApiKey = document.getElementById('reportOpenRouterApiKey')?.value || '';
+        const response = await fetch('/api/report-models/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openrouter_api_key: openrouterApiKey })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            reportNotice('Model refresh failed: ' + (data.error || 'Unknown error'), 'error');
+            return;
+        }
+        reportModels = data.models || [];
+        populateReportModelSelect('reportModelSelect', reportSettings.default_model);
+        populateReportModelSelect('reportGenerateModelSelect', reportSettings.default_model, true);
+        reportNotice('Report models refreshed', 'success');
+    } catch (error) {
+        console.error('Error refreshing report models:', error);
+        reportNotice('Model refresh failed', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function populateReportModelSelect(selectId, selectedModel, includeSavedDefault = false) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    select.innerHTML = '';
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = includeSavedDefault ? 'Use saved default' : 'Select a model';
+    select.appendChild(emptyOption);
+
+    const groups = {};
+    reportModels.forEach(model => {
+        const provider = model.provider || (model.id || '').split('/')[0] || 'Other';
+        if (!groups[provider]) {
+            groups[provider] = document.createElement('optgroup');
+            groups[provider].label = provider.charAt(0).toUpperCase() + provider.slice(1);
+            select.appendChild(groups[provider]);
+        }
+
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name ? `${model.name} (${model.id})` : model.id;
+        groups[provider].appendChild(option);
+    });
+
+    if (selectedModel && !Array.from(select.options).some(option => option.value === selectedModel)) {
+        const savedOption = document.createElement('option');
+        savedOption.value = selectedModel;
+        savedOption.textContent = `${selectedModel} (saved)`;
+        select.appendChild(savedOption);
+    }
+
+    if (selectedModel) {
+        select.value = selectedModel;
+    }
+}
+
 function updateCrawlerSettings() {
     // Send updated settings to crawler
     fetch('/api/update_crawler_settings', {
@@ -849,6 +1049,14 @@ document.addEventListener('keydown', function(event) {
 window.getCurrentSettings = function() {
     return currentSettings;
 };
+
+window.getReportSettings = function() {
+    return reportSettings;
+};
+
+window.loadReportSettings = loadReportSettings;
+window.loadReportModels = loadReportModels;
+window.populateReportModelSelect = populateReportModelSelect;
 
 // Apply custom CSS to the page
 function applyCustomCSS() {

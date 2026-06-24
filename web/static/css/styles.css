@@ -630,6 +630,8 @@ body {
 }
 
 .setting-group input[type="text"],
+.setting-group input[type="password"],
+.setting-group input[type="color"],
 .setting-group input[type="number"],
 .setting-group select,
 .setting-group textarea {
@@ -645,6 +647,8 @@ body {
 }
 
 .setting-group input[type="text"]:focus,
+.setting-group input[type="password"]:focus,
+.setting-group input[type="color"]:focus,
 .setting-group input[type="number"]:focus,
 .setting-group select:focus,
 .setting-group textarea:focus {
@@ -659,6 +663,28 @@ body {
     min-height: 80px;
     font-family: 'Consolas', 'SF Mono', Monaco, monospace;
     font-size: 13px;
+}
+
+.setting-group input[type="color"] {
+    max-width: 96px;
+    height: 42px;
+    padding: 4px;
+}
+
+.report-status {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.4);
+    color: #bfdbfe;
+    font-size: 14px;
+}
+
+.report-actions-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
 }
 
 .setting-help {
@@ -783,6 +809,17 @@ body {
 
     .checkbox-grid {
         grid-template-columns: 1fr;
+    }
+
+    .report-actions-row,
+    #reportModal .modal-footer {
+        flex-wrap: wrap;
+    }
+
+    .report-actions-row .btn,
+    #reportModal .modal-footer .btn {
+        flex: 1 1 160px;
+        text-align: center;
     }
 }
 

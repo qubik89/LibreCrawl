@@ -87,6 +87,16 @@ async function initializeApp() {
         }
     }
 
+    const reportCrawlId = sessionStorage.getItem('open_report_modal_crawl_id');
+    if (reportCrawlId) {
+        sessionStorage.removeItem('open_report_modal_crawl_id');
+        setTimeout(() => {
+            if (typeof openReportModal === 'function') {
+                openReportModal(parseInt(reportCrawlId, 10));
+            }
+        }, 250);
+    }
+
     // Set initial focus
     document.getElementById('urlInput').focus();
 

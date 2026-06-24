@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{{ branding.agency_name }} Report</title>
+    <style>
+        :root {
+            --brand-primary: {{ branding.primary_color }};
+            --text: #111827;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --background: #ffffff;
+        }
+
+        body {
+            margin: 0;
+            color: var(--text);
+            background: var(--background);
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .page {
+            padding: 36px 42px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            border-bottom: 3px solid var(--brand-primary);
+            padding-bottom: 18px;
+            margin-bottom: 28px;
+        }
+
+        .agency {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .crawl {
+            color: var(--muted);
+            font-size: 12px;
+            text-align: right;
+        }
+
+        .logo {
+            max-width: 140px;
+            max-height: 52px;
+            object-fit: contain;
+            margin-bottom: 8px;
+        }
+
+        h1, h2, h3 {
+            color: var(--text);
+            line-height: 1.25;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin: 0 0 18px;
+        }
+
+        h2 {
+            border-bottom: 1px solid var(--border);
+            font-size: 20px;
+            margin-top: 28px;
+            padding-bottom: 6px;
+        }
+
+        a {
+            color: var(--brand-primary);
+        }
+
+        table {
+            border-collapse: collapse;
+            margin: 18px 0;
+            width: 100%;
+        }
+
+        th, td {
+            border: 1px solid var(--border);
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #f9fafb;
+        }
+
+        code {
+            background: #f3f4f6;
+            border-radius: 4px;
+            padding: 2px 4px;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 36px;
+            padding-top: 14px;
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <header>
+            <div>
+                {% if branding.logo_path %}
+                    <img class="logo" src="{{ branding.logo_path }}" alt="{{ branding.agency_name }}">
+                {% endif %}
+                <div class="agency">{{ branding.agency_name }}</div>
+            </div>
+            <div class="crawl">
+                {% if crawl.base_domain %}
+                    <div>{{ crawl.base_domain }}</div>
+                {% endif %}
+                {% if crawl.base_url %}
+                    <div>{{ crawl.base_url }}</div>
+                {% endif %}
+                {% if crawl.id %}
+                    <div>Crawl #{{ crawl.id }}</div>
+                {% endif %}
+            </div>
+        </header>
+
+        <article>
+            {{ report_html|safe }}
+        </article>
+
+        {% if branding.footer_text %}
+            <footer>{{ branding.footer_text }}</footer>
+        {% endif %}
+    </main>
+</body>
+</html>

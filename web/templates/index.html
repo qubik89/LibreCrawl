@@ -517,6 +517,7 @@
                     <button class="settings-tab-btn" onclick="switchSettingsTab('javascript')">JavaScript</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('issues')">Issue Exclusion</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('customcss')">Custom CSS</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('reports')">Reports</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')">Advanced</button>
                 </div>
 
@@ -936,6 +937,73 @@
                     </div>
                 </div>
 
+                <!-- Reports Settings -->
+                <div id="reports-settings" class="settings-tab-content">
+                    <h3>PDF Report Settings</h3>
+
+                    <div class="setting-group">
+                        <label for="reportOpenRouterApiKey">OpenRouter API Key</label>
+                        <input type="password" id="reportOpenRouterApiKey" placeholder="Leave blank to keep the saved key">
+                        <span class="setting-help" id="reportOpenRouterKeyStatus">No key saved</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportModelSelect">Default Model</label>
+                        <div class="report-actions-row">
+                            <select id="reportModelSelect">
+                                <option value="">No cached models</option>
+                            </select>
+                            <button type="button" class="btn btn-secondary" id="reportRefreshModelsBtn" onclick="refreshReportModels()">Refresh</button>
+                        </div>
+                        <span class="setting-help">Cached OpenAI, Anthropic, and DeepSeek models from OpenRouter.</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportManualModel">Manual Model</label>
+                        <input type="text" id="reportManualModel" placeholder="openai/gpt-4.1">
+                        <span class="setting-help">Overrides the selected default model when set.</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportDefaultLanguage">Language</label>
+                        <select id="reportDefaultLanguage">
+                            <option value="es-ES">Spanish (Spain)</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportDefaultTone">Tone</label>
+                        <select id="reportDefaultTone">
+                            <option value="executive">Executive</option>
+                            <option value="technical">Technical</option>
+                            <option value="commercial">Commercial</option>
+                        </select>
+                    </div>
+
+                    <h3 style="margin-top: 30px;">Branding</h3>
+
+                    <div class="setting-group">
+                        <label for="reportAgencyName">Agency Name</label>
+                        <input type="text" id="reportAgencyName" placeholder="LibreCrawl">
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportPrimaryColor">Primary Color</label>
+                        <input type="color" id="reportPrimaryColor" value="#2563eb">
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportFooterText">Footer Text</label>
+                        <textarea id="reportFooterText" rows="3" placeholder="Prepared by your agency"></textarea>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportLogoPath">Logo Path</label>
+                        <input type="text" id="reportLogoPath" placeholder="/static/logo.png">
+                    </div>
+                </div>
+
                 <!-- Advanced Settings -->
                 <div id="advanced-settings" class="settings-tab-content">
                     <h3>Advanced Configuration</h3>
@@ -996,6 +1064,77 @@
                 <button class="btn btn-secondary" onclick="resetSettings()">Reset to Defaults</button>
                 <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reportModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Generate PDF Report</h2>
+                <button class="modal-close" onclick="closeReportModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="padding: 24px;">
+                    <div class="setting-group">
+                        <label for="reportGenerateModelSelect">Model</label>
+                        <select id="reportGenerateModelSelect">
+                            <option value="">Use saved default</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateManualModel">Manual Model</label>
+                        <input type="text" id="reportGenerateManualModel" placeholder="openai/gpt-4.1">
+                        <span class="setting-help">Overrides the selected model for this report.</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateLanguage">Language</label>
+                        <select id="reportGenerateLanguage">
+                            <option value="es-ES">Spanish (Spain)</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateTone">Tone</label>
+                        <select id="reportGenerateTone">
+                            <option value="executive">Executive</option>
+                            <option value="technical">Technical</option>
+                            <option value="commercial">Commercial</option>
+                        </select>
+                    </div>
+
+                    <h3 style="margin-top: 24px;">Branding</h3>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateAgencyName">Agency Name</label>
+                        <input type="text" id="reportGenerateAgencyName" placeholder="LibreCrawl">
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGeneratePrimaryColor">Primary Color</label>
+                        <input type="color" id="reportGeneratePrimaryColor" value="#2563eb">
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateFooterText">Footer Text</label>
+                        <textarea id="reportGenerateFooterText" rows="3"></textarea>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="reportGenerateLogoPath">Logo Path</label>
+                        <input type="text" id="reportGenerateLogoPath" placeholder="/static/logo.png">
+                    </div>
+
+                    <div class="report-status" id="reportGenerationStatus" style="display: none;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a class="btn btn-success" id="reportDownloadLink" href="#" target="_blank" style="display: none;">Download PDF</a>
+                <button class="btn btn-secondary" onclick="closeReportModal()">Cancel</button>
+                <button class="btn btn-primary" id="reportGenerateBtn" onclick="submitReportGeneration()">Generate PDF</button>
             </div>
         </div>
     </div>

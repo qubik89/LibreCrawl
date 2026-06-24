@@ -304,6 +304,18 @@
     </div>
 
     <script>
+        let reportActionsEnabled = false;
+
+        async function loadReportPermissions() {
+            try {
+                const response = await fetch('/api/user/info');
+                const data = await response.json();
+                reportActionsEnabled = Boolean(data.success && data.user && data.user.tier === 'admin');
+            } catch (error) {
+                reportActionsEnabled = false;
+            }
+        }
+
         async function loadStats() {
             try {
                 const response = await fetch('/api/crawls/stats');
@@ -347,6 +359,9 @@
                                         : ''}
                                     ${crawl.urls_crawled > 0
                                         ? `<button class="btn btn-secondary btn-small" onclick="viewCrawl(${crawl.id})">Load</button>`
+                                        : ''}
+                                    ${crawl.status === 'completed' && reportActionsEnabled
+                                        ? `<button class="btn btn-secondary btn-small" id="report-btn-${crawl.id}" onclick="generateReport(${crawl.id})">Report</button>`
                                         : ''}
                                     <button class="btn btn-danger btn-small" onclick="deleteCrawl(${crawl.id})">Delete</button>
                                 </td>
@@ -455,8 +470,15 @@
             }
         }
 
-        loadStats();
-        loadCrawls();
+        async function generateReport(crawlId) {
+            sessionStorage.setItem('open_report_modal_crawl_id', crawlId);
+            window.location.href = '/';
+        }
+
+        loadReportPermissions().then(() => {
+            loadStats();
+            loadCrawls();
+        });
 
         setInterval(() => {
             loadStats();
