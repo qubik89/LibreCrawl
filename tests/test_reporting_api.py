@@ -79,6 +79,9 @@ main = import_main()
 class ReportingApiHelperTest(unittest.TestCase):
     def setUp(self):
         main.session.clear()
+        main.request.path = ''
+        main.get_user_by_id.reset_mock()
+        main.get_user_by_id.return_value = {'id': 5, 'username': 'test'}
 
     def test_public_report_settings_hides_openrouter_key(self):
         settings = {
@@ -92,6 +95,16 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertTrue(public['has_openrouter_api_key'])
         self.assertEqual(public['masked_openrouter_api_key'], 'sk-l...7890')
         self.assertEqual(public['default_model'], 'openai/gpt-4.1')
+
+    def test_login_required_rejects_stale_user_session_for_api(self):
+        main.session.update({'user_id': 999, 'username': 'stale', 'tier': 'admin'})
+        main.request.path = '/api/start_crawl'
+        main.get_user_by_id.return_value = None
+
+        response = main.login_required(lambda: {'ok': True})()
+
+        self.assertEqual(response, ({'success': False, 'error': 'Authentication required'}, 401))
+        self.assertEqual(main.session, {})
 
     def test_report_settings_update_preserves_blank_or_missing_key(self):
         self.assertEqual(

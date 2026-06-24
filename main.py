@@ -214,6 +214,11 @@ def login_required(f):
         # In local mode, auto-login if not already logged in
         if LOCAL_MODE and 'user_id' not in session:
             auto_login_local_mode()
+        elif session.get('user_id') is not None and get_user_by_id(session.get('user_id')) is None:
+            session.clear()
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+            return redirect(url_for('login_page'))
         elif 'user_id' not in session:
             # Not in local mode and not logged in
             if request.path.startswith('/api/'):
