@@ -415,7 +415,7 @@ def set_crawl_status(crawl_id, status):
         with get_db() as conn:
             cursor = conn.cursor()
 
-            if status in ['completed', 'failed', 'stopped']:
+            if status in ['completed', 'failed', 'stopped', 'demo_stopped']:
                 cursor.execute('''
                     UPDATE crawls
                     SET status = ?, completed_at = CURRENT_TIMESTAMP
@@ -453,11 +453,30 @@ def get_crawl_by_id(crawl_id):
                 if crawl.get('resume_checkpoint'):
                     crawl['resume_checkpoint'] = json.loads(crawl['resume_checkpoint'])
                 return crawl
-            return None
+        return None
 
     except Exception as e:
         print(f"Error fetching crawl: {e}")
         return None
+
+def get_crawl_counts(crawl_id):
+    """Return persisted row counts for a crawl."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            counts = {}
+            for key, table in (
+                ('urls', 'crawled_urls'),
+                ('links', 'crawl_links'),
+                ('issues', 'crawl_issues'),
+            ):
+                cursor.execute(f'SELECT COUNT(*) AS count FROM {table} WHERE crawl_id = ?', (crawl_id,))
+                row = cursor.fetchone()
+                counts[key] = row['count'] if row else 0
+            return counts
+    except Exception as e:
+        print(f"Error fetching crawl counts: {e}")
+        return {'urls': 0, 'links': 0, 'issues': 0}
 
 def get_user_crawls(user_id, limit=50, offset=0, status_filter=None):
     """Get all crawls for a user"""
@@ -465,7 +484,13 @@ def get_user_crawls(user_id, limit=50, offset=0, status_filter=None):
         with get_db() as conn:
             cursor = conn.cursor()
 
-            query = 'SELECT * FROM crawls WHERE user_id = ?'
+            query = '''
+                SELECT crawls.*,
+                       (SELECT COUNT(*) FROM crawl_links WHERE crawl_links.crawl_id = crawls.id) AS link_count,
+                       (SELECT COUNT(*) FROM crawl_issues WHERE crawl_issues.crawl_id = crawls.id) AS issue_count
+                FROM crawls
+                WHERE user_id = ?
+            '''
             params = [user_id]
 
             if status_filter:
@@ -496,7 +521,7 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
         with get_db() as conn:
             cursor = conn.cursor()
 
-            query = 'SELECT * FROM crawled_urls WHERE crawl_id = ? ORDER BY crawled_at'
+            query = 'SELECT * FROM crawled_urls WHERE crawl_id = ? ORDER BY id'
             params = [crawl_id]
 
             if limit:
@@ -532,7 +557,7 @@ def load_crawl_links(crawl_id, limit=None, offset=0):
         with get_db() as conn:
             cursor = conn.cursor()
 
-            query = 'SELECT * FROM crawl_links WHERE crawl_id = ?'
+            query = 'SELECT * FROM crawl_links WHERE crawl_id = ? ORDER BY id'
             params = [crawl_id]
 
             if limit:
@@ -553,7 +578,7 @@ def load_crawl_issues(crawl_id, limit=None, offset=0):
         with get_db() as conn:
             cursor = conn.cursor()
 
-            query = 'SELECT * FROM crawl_issues WHERE crawl_id = ?'
+            query = 'SELECT * FROM crawl_issues WHERE crawl_id = ? ORDER BY id'
             params = [crawl_id]
 
             if limit:
@@ -574,8 +599,8 @@ def get_resume_data(crawl_id):
     if not crawl:
         return None
 
-    # Only allow resume for paused/failed/running crawls
-    if crawl['status'] not in ['paused', 'failed', 'running']:
+    # Only allow resume for interrupted crawls
+    if crawl['status'] not in ['paused', 'failed', 'running', 'stopped']:
         return None
 
     return crawl

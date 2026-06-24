@@ -342,7 +342,7 @@
                                 <td>${crawl.urls_crawled || 0}</td>
                                 <td>${duration}</td>
                                 <td class="actions">
-                                    ${(crawl.status === 'paused' || crawl.status === 'failed') && crawl.urls_crawled > 0
+                                    ${(crawl.status === 'paused' || crawl.status === 'failed' || crawl.status === 'stopped' || crawl.status === 'running')
                                         ? `<button class="btn btn-primary btn-small" onclick="resumeCrawl(${crawl.id})">Resume</button>`
                                         : ''}
                                     ${crawl.urls_crawled > 0
@@ -400,7 +400,8 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    alert('Crawl resumed successfully. Redirecting...');
+                    sessionStorage.setItem('force_ui_refresh', 'true');
+                    sessionStorage.setItem('loaded_crawl_id', crawlId);
                     window.location.href = '/';
                 } else {
                     alert('Error: ' + data.message);
@@ -420,8 +421,8 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Store flag in sessionStorage to tell main UI to force refresh
                     sessionStorage.setItem('force_ui_refresh', 'true');
+                    sessionStorage.setItem('loaded_crawl_id', crawlId);
                     sessionStorage.setItem('loaded_urls', data.urls_count);
                     sessionStorage.setItem('loaded_links', data.links_count);
                     sessionStorage.setItem('loaded_issues', data.issues_count);

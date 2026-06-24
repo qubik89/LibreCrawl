@@ -1,5 +1,6 @@
 // Application State
 let crawlState = {
+    currentCrawlId: null,
     isRunning: false,
     isPaused: false,
     startTime: null,
@@ -24,6 +25,14 @@ let crawlState = {
         }
     }
 };
+
+let serverPageOffsets = {
+    urls: 0,
+    links: 0,
+    issues: 0
+};
+
+const SERVER_PAGE_SIZE = 500;
 
 // Incremental polling instance
 let incrementalPoller = null;
@@ -62,104 +71,15 @@ async function initializeApp() {
     // DEBUG: Check sessionStorage
     console.log('DEBUG: Checking sessionStorage force_ui_refresh:', sessionStorage.getItem('force_ui_refresh'));
 
-    // Check if we just loaded a crawl from dashboard
-    if (sessionStorage.getItem('force_ui_refresh') === 'true') {
+    // Check if we just attached to a crawl from dashboard
+    const loadedCrawlId = sessionStorage.getItem('loaded_crawl_id');
+    if (sessionStorage.getItem('force_ui_refresh') === 'true' && loadedCrawlId) {
         console.log('DEBUG: Found force_ui_refresh flag, loading crawl data...');
         sessionStorage.removeItem('force_ui_refresh');
+        sessionStorage.removeItem('loaded_crawl_id');
 
         try {
-            // Fetch the loaded data immediately with FULL refresh (no incremental)
-            const response = await fetch('/api/crawl_status');
-            const data = await response.json();
-
-            // DEBUG: Log the full response
-            console.log('DEBUG: Full /api/crawl_status response:', JSON.stringify(data, null, 2));
-
-            // Clear existing data first
-            clearAllTables();
-            resetStats();
-
-            // Force populate all data
-            crawlState.urls = [];
-            crawlState.links = data.links || [];
-            crawlState.issues = data.issues || [];
-            crawlState.stats = data.stats || {};
-            crawlState.baseUrl = data.stats?.baseUrl || '';
-
-            // Set URL input
-            if (crawlState.baseUrl) {
-                document.getElementById('urlInput').value = crawlState.baseUrl;
-            }
-
-            // Add each URL to tables
-            if (data.urls && data.urls.length > 0) {
-                data.urls.forEach(url => addUrlToTable(url));
-            }
-
-            // Load links if present
-            if (data.links && data.links.length > 0) {
-                crawlState.pendingLinks = data.links;
-                // If links tab is active, load them immediately
-                if (isLinksTabActive()) {
-                    updateLinksTable(data.links);
-                }
-            }
-
-            // Load issues if present
-            if (data.issues && data.issues.length > 0) {
-                crawlState.pendingIssues = data.issues;
-                // If issues tab is active, load them immediately
-                if (isIssuesTabActive()) {
-                    updateIssuesTable(data.issues);
-                } else {
-                    // Update badge count even if tab not active
-                    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
-                    if (issuesTabButton && data.issues.length > 0) {
-                        const errorCount = data.issues.filter(i => i.type === 'error').length;
-                        const warningCount = data.issues.filter(i => i.type === 'warning').length;
-                        let badgeColor = '#3b82f6';
-                        if (errorCount > 0) badgeColor = '#ef4444';
-                        else if (warningCount > 0) badgeColor = '#f59e0b';
-                        issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${data.issues.length}</span>`;
-                    }
-                }
-            }
-
-            // Update all displays
-            updateStatsDisplay();
-            updateFilterCounts();
-            updateStatusCodesTable();
-            updateCrawlButtons();
-
-            // Check if the crawl is currently running (resumed from dashboard)
-            if (data.status === 'running') {
-                // Set crawl state to running
-                crawlState.isRunning = true;
-                crawlState.isPaused = false;
-                crawlState.startTime = new Date(); // Set start time to now for timer
-
-                // Show progress UI
-                showProgress();
-
-                // Update buttons for running state
-                updateCrawlButtons();
-
-                // Start polling for updates
-                updateStatus('Crawl resumed - updating...');
-                pollCrawlProgress();
-            } else {
-                // Crawl is not running, just loaded data
-                updateStatus(`Loaded crawl: ${data.stats.crawled} URLs, ${data.links?.length || 0} links, ${data.issues?.length || 0} issues`);
-            }
-
-            console.log('Loaded crawl from database:', {
-                urls: data.urls?.length || 0,
-                links: data.links?.length || 0,
-                issues: data.issues?.length || 0,
-                stats: data.stats,
-                status: data.status,
-                isRunning: crawlState.isRunning
-            });
+            await attachToServerCrawl(parseInt(loadedCrawlId, 10));
         } catch (error) {
             console.error('Error loading crawl data:', error);
             updateStatus('Error loading crawl data');
@@ -222,6 +142,8 @@ function startCrawl() {
     crawlState.isPaused = false;
     crawlState.startTime = new Date();
     crawlState.baseUrl = url;
+    crawlState.currentCrawlId = null;
+    resetServerOffsets();
 
     // Initialize incremental poller for new crawl
     if (!incrementalPoller) {
@@ -248,7 +170,7 @@ function pauseCrawl() {
     updateStatus('Crawl paused');
 
     // Pause Python crawler
-    fetch('/api/pause_crawl', {
+    fetch(crawlState.currentCrawlId ? `/api/crawls/${crawlState.currentCrawlId}/pause` : '/api/pause_crawl', {
         method: 'POST'
     }).catch(error => {
         console.error('Error pausing crawl:', error);
@@ -261,7 +183,7 @@ function resumeCrawl() {
     updateStatus('Resuming crawl...');
 
     // Resume Python crawler
-    fetch('/api/resume_crawl', {
+    fetch(crawlState.currentCrawlId ? `/api/crawls/${crawlState.currentCrawlId}/resume` : '/api/resume_crawl', {
         method: 'POST'
     }).catch(error => {
         console.error('Error resuming crawl:', error);
@@ -296,6 +218,8 @@ function clearCrawlData() {
     crawlState.links = [];
     crawlState.issues = [];
     crawlState.baseUrl = null;
+    crawlState.currentCrawlId = null;
+    resetServerOffsets();
     crawlState.filters.active = null;
     crawlState.pendingLinks = null;
     crawlState.pendingIssues = null;
@@ -356,6 +280,8 @@ function startPythonCrawl(url) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            crawlState.currentCrawlId = data.crawl_id;
+            sessionStorage.setItem('current_crawl_id', data.crawl_id);
             updateStatus('Crawling in progress...');
             // Refresh user info to update crawl count
             loadUserInfo();
@@ -374,7 +300,7 @@ function startPythonCrawl(url) {
 }
 
 function stopPythonCrawl() {
-    fetch('/api/stop_crawl', {
+    fetch(crawlState.currentCrawlId ? `/api/crawls/${crawlState.currentCrawlId}/stop` : '/api/stop_crawl', {
         method: 'POST'
     })
     .then(response => response.json())
@@ -386,65 +312,102 @@ function stopPythonCrawl() {
     });
 }
 
-function pollCrawlProgress() {
+async function pollCrawlProgress() {
     if (!crawlState.isRunning) return;
 
-    // Use incremental poller if available, otherwise fall back to regular fetch
-    const fetchPromise = incrementalPoller
-        ? incrementalPoller.fetchUpdate()
-        : fetch('/api/crawl_status').then(response => response.json());
+    try {
+        const crawlId = crawlState.currentCrawlId;
+        const response = await fetch(crawlId ? `/api/crawls/${crawlId}/status` : '/api/crawl_status');
+        const data = await response.json();
 
-    fetchPromise
-        .then(data => {
-            updateCrawlData(data);
+        if (crawlId) {
+            await fetchServerPageUpdates(crawlId, data);
+        }
 
-            // Update bottom status bar based on current state
-            if (data.is_running_pagespeed) {
-                updateStatus('Running PageSpeed analysis...');
-            } else if (data.status === 'running') {
-                updateStatus('Crawling in progress...');
-            }
+        updateCrawlData(data);
 
-            // Update visualization if visualization tab is active
-            const vizTab = document.getElementById('visualization-tab');
-            if (vizTab && vizTab.classList.contains('active') && typeof loadVisualizationData === 'function') {
-                loadVisualizationData();
-            }
+        if (data.is_running_pagespeed) {
+            updateStatus('Running PageSpeed analysis...');
+        } else if (data.status === 'running') {
+            updateStatus('Crawling in progress...');
+        }
 
-            if (data.status === 'demo_stopped' || data.demo_stopped) {
-                stopCrawl();
-                updateStatus('Demo limit reached — crawl data saved');
-                showDemoLimitNotification();
-                if (typeof loadVisualizationData === 'function') {
-                    loadVisualizationData();
-                }
-            } else if (crawlState.isRunning && data.status !== 'completed') {
-                setTimeout(pollCrawlProgress, 1000); // Poll every second
-            } else if (data.status === 'completed') {
-                stopCrawl();
-                updateStatus('Crawl completed');
-                // Update visualization one final time when crawl completes
-                if (typeof loadVisualizationData === 'function') {
-                    loadVisualizationData();
-                }
-                // Notify plugins that crawl is complete
-                if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
-                    window.LibreCrawlPlugin.loader.notifyCrawlComplete({
-                        urls: crawlState.urls,
-                        links: crawlState.links,
-                        issues: crawlState.issues,
-                        stats: crawlState.stats
-                    });
-                }
+        const vizTab = document.getElementById('visualization-tab');
+        if (vizTab && vizTab.classList.contains('active') && typeof loadVisualizationData === 'function') {
+            loadVisualizationData();
+        }
+
+        if (data.status === 'demo_stopped' || data.demo_stopped) {
+            crawlState.isRunning = false;
+            updateCrawlButtons();
+            updateStatus('Demo limit reached — crawl data saved');
+            showDemoLimitNotification();
+        } else if (crawlState.isRunning && data.status !== 'completed' && data.status !== 'failed' && data.status !== 'stopped') {
+            setTimeout(pollCrawlProgress, 1000);
+        } else if (data.status === 'completed') {
+            crawlState.isRunning = false;
+            updateCrawlButtons();
+            hideProgress();
+            updateStatus('Crawl completed');
+            if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+                window.LibreCrawlPlugin.loader.notifyCrawlComplete({
+                    urls: crawlState.urls,
+                    links: crawlState.links,
+                    issues: crawlState.issues,
+                    stats: crawlState.stats
+                });
             }
-        })
-        .catch(error => {
-            console.error('Error polling crawl status:', error);
-            // Continue polling even if there's an error (common on large crawls)
-            if (crawlState.isRunning) {
-                setTimeout(pollCrawlProgress, 1000);
-            }
-        });
+        }
+    } catch (error) {
+        console.error('Error polling crawl status:', error);
+        if (crawlState.isRunning) {
+            setTimeout(pollCrawlProgress, 1000);
+        }
+    }
+}
+
+function resetServerOffsets() {
+    serverPageOffsets = { urls: 0, links: 0, issues: 0 };
+}
+
+async function fetchServerPageUpdates(crawlId, data) {
+    const [urls, links, issues] = await Promise.all([
+        fetch(`/api/crawls/${crawlId}/urls?offset=${serverPageOffsets.urls}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json()),
+        fetch(`/api/crawls/${crawlId}/links?offset=${serverPageOffsets.links}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json()),
+        fetch(`/api/crawls/${crawlId}/issues?offset=${serverPageOffsets.issues}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json())
+    ]);
+
+    data.urls = urls.urls || [];
+    data.links = links.links || [];
+    data.issues = issues.issues || [];
+    serverPageOffsets.urls += data.urls.length;
+    serverPageOffsets.links += data.links.length;
+    serverPageOffsets.issues += data.issues.length;
+}
+
+async function attachToServerCrawl(crawlId) {
+    crawlState.currentCrawlId = crawlId;
+    resetServerOffsets();
+    clearAllTables();
+    resetStats();
+
+    const response = await fetch(`/api/crawls/${crawlId}/status`);
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error || 'Failed to attach crawl');
+
+    await fetchServerPageUpdates(crawlId, data);
+    crawlState.baseUrl = data.stats?.baseUrl || '';
+    if (crawlState.baseUrl) document.getElementById('urlInput').value = crawlState.baseUrl;
+
+    crawlState.isRunning = ['running', 'paused'].includes(data.status);
+    crawlState.isPaused = data.status === 'paused';
+    crawlState.startTime = crawlState.isRunning ? new Date() : null;
+    if (crawlState.isRunning) showProgress();
+    updateCrawlData(data);
+    updateCrawlButtons();
+    updateStatus(crawlState.isRunning ? 'Attached to running crawl' : `Loaded crawl: ${data.stats?.crawled || 0} URLs`);
+
+    if (crawlState.isRunning) pollCrawlProgress();
 }
 
 function updateCrawlData(data) {
@@ -465,26 +428,31 @@ function updateCrawlData(data) {
     }
 
     // Update links tables only if Links tab is active to improve performance
-    if (data.links) {
-        // Always store links data in crawlState
-        crawlState.links = data.links;
+    if (data.links && data.links.length > 0) {
+        const existingLinks = new Set(crawlState.links.map(link => `${link.source_url}|${link.target_url}`));
+        data.links.forEach(link => {
+            const key = `${link.source_url}|${link.target_url}`;
+            if (!existingLinks.has(key)) {
+                existingLinks.add(key);
+                crawlState.links.push(link);
+            }
+        });
         if (isLinksTabActive()) {
-            updateLinksTable(data.links);
+            updateLinksTable(crawlState.links);
         } else {
             // Store in pendingLinks for lazy loading when switching to tab
-            crawlState.pendingLinks = data.links;
+            crawlState.pendingLinks = crawlState.links;
         }
     }
 
     // Update issues table only if Issues tab is active
-    if (data.issues) {
-        // Always store issues data in crawlState
-        crawlState.issues = data.issues;
+    if (data.issues && data.issues.length > 0) {
+        crawlState.issues.push(...data.issues);
         if (isIssuesTabActive()) {
-            updateIssuesTable(data.issues);
+            updateIssuesTable(crawlState.issues);
         } else {
             // Store in pendingIssues for lazy loading when switching to tab
-            crawlState.pendingIssues = data.issues;
+            crawlState.pendingIssues = crawlState.issues;
         }
     }
 
@@ -522,6 +490,8 @@ function updateProgressText(data) {
         progressText.textContent = 'Running PageSpeed analysis...';
     } else if (data.status === 'completed') {
         progressText.textContent = 'Crawl completed';
+    } else if (data.status === 'paused') {
+        progressText.textContent = 'Crawl paused';
     } else if (data.status === 'running') {
         const stats = data.stats || crawlState.stats;
         if (stats.crawled === 0) {
@@ -987,6 +957,8 @@ function clearAllTables() {
     if (statusCodesBody) statusCodesBody.innerHTML = '';
 
     crawlState.urls = [];
+    crawlState.links = [];
+    crawlState.issues = [];
 
     console.log('All tables cleared');
 }
@@ -1602,6 +1574,7 @@ async function exportData() {
             body: JSON.stringify({
                 format: exportFormat,
                 fields: exportFields,
+                crawlId: crawlState.currentCrawlId,
                 // Send local data if we have it (for loaded crawls)
                 localData: {
                     urls: exportUrls,

@@ -15,6 +15,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
+from src import crawl_jobs
 from src.settings_manager import SettingsManager
 from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email
 from src.email_service import send_verification_email, send_welcome_email
@@ -225,13 +226,88 @@ def login_required(f):
 crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'settings': SettingsManager, 'last_accessed': datetime}
 instances_lock = threading.Lock()
 
-def get_or_create_crawler():
-    """Get or create a crawler instance for the current session"""
-    # Get or create session ID
+def ensure_session_id():
+    """Ensure the browser session has a stable id for settings and guest ownership."""
     if 'session_id' not in session:
         session['session_id'] = str(uuid.uuid4())
+    return session['session_id']
 
-    session_id = session['session_id']
+def user_can_access_crawl(crawl, user_id, session_id):
+    """Check crawl ownership for account users and guests."""
+    if not crawl:
+        return False
+    if crawl.get('user_id') is None:
+        return crawl.get('session_id') == session_id
+    return crawl.get('user_id') == user_id
+
+def register_server_crawler(crawler):
+    """Put a crawler in the server registry until it finishes."""
+    crawler.on_finish = lambda finished: crawl_jobs.unregister(finished.crawl_id)
+    return crawl_jobs.register(crawler)
+
+def build_crawl_summary(crawl_id):
+    """Return a small crawl summary from DB plus live runner state."""
+    from src.crawl_db import get_crawl_by_id, get_crawl_counts
+
+    crawl = get_crawl_by_id(crawl_id)
+    if not crawl:
+        return None
+
+    active = crawl_jobs.get(crawl_id)
+    counts = get_crawl_counts(crawl_id)
+
+    status = crawl.get('status', 'unknown')
+    discovered = crawl.get('urls_discovered') or counts['urls']
+    crawled = crawl.get('urls_crawled') or counts['urls']
+    depth = crawl.get('max_depth_reached') or 0
+    speed = 0.0
+    progress = min(100, (crawled / max(discovered, 1)) * 100)
+    memory = {}
+    memory_data = {}
+    is_running_pagespeed = False
+    demo_stopped = status == 'demo_stopped'
+
+    if active:
+        link_stats = active.link_manager.get_stats() if active.link_manager else {'discovered': discovered}
+        discovered = link_stats.get('discovered', discovered)
+        crawled = active.stats.get('crawled', crawled)
+        depth = active.stats.get('depth', depth)
+        if active.stats.get('start_time'):
+            speed = round(crawled / max(time.time() - active.stats['start_time'], 1), 2)
+        status = 'paused' if active.is_paused else ('running' if active.is_running else status)
+        progress = min(100, (crawled / max(discovered, 1)) * 100)
+        memory = active.memory_monitor.get_stats()
+        memory_data = active.user_memory.get_stats()
+        is_running_pagespeed = active.is_running_pagespeed
+        demo_stopped = active._demo_limit_reached
+
+    return {
+        'success': True,
+        'crawl_id': crawl_id,
+        'status': status,
+        'is_active': active is not None,
+        'is_running_pagespeed': is_running_pagespeed,
+        'demo_stopped': demo_stopped,
+        'crawl': crawl,
+        'stats': {
+            'baseUrl': crawl.get('base_url'),
+            'discovered': discovered,
+            'crawled': crawled,
+            'depth': depth,
+            'speed': speed,
+            'url_count': counts['urls'],
+            'link_count': counts['links'],
+            'issue_count': counts['issues'],
+        },
+        'progress': progress,
+        'memory': memory,
+        'memory_data': memory_data,
+        'counts': counts,
+    }
+
+def get_or_create_crawler():
+    """Get or create a crawler instance for the current session"""
+    session_id = ensure_session_id()
     user_id = session.get('user_id')  # Get user_id from session
     tier = session.get('tier', 'guest')  # Get tier from session
 
@@ -252,11 +328,7 @@ def get_or_create_crawler():
 
 def get_session_settings():
     """Get the settings manager for the current session"""
-    # Get or create session ID
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
-
-    session_id = session['session_id']
+    session_id = ensure_session_id()
     user_id = session.get('user_id')  # Get user_id from session
     tier = session.get('tier', 'guest')  # Get tier from session
 
@@ -721,7 +793,7 @@ def start_crawl():
         return jsonify({'success': False, 'error': 'URL is required'})
 
     user_id = session.get('user_id')
-    session_id = session.get('session_id')
+    session_id = ensure_session_id()
     tier = session.get('tier', 'guest')
 
     # Check guest limits (IP-based) - skip in local mode
@@ -738,9 +810,8 @@ def start_crawl():
         # Log this guest crawl
         log_guest_crawl(client_ip)
 
-    # Get or create crawler for this session
-    crawler = get_or_create_crawler()
     settings_manager = get_session_settings()
+    crawler = WebCrawler()
 
     # Apply current settings to crawler before starting
     try:
@@ -760,6 +831,7 @@ def start_crawl():
     # Store crawl_id in session
     if success and crawler.crawl_id:
         session['current_crawl_id'] = crawler.crawl_id
+        register_server_crawler(crawler)
         # Also log to old crawl_history for compatibility
         log_crawl_start(user_id, url)
 
@@ -768,62 +840,54 @@ def start_crawl():
 @app.route('/api/stop_crawl', methods=['POST'])
 @login_required
 def stop_crawl():
-    crawler = get_or_create_crawler()
-    success, message = crawler.stop_crawl()
-    return jsonify({'success': success, 'message': message})
+    crawl_id = session.get('current_crawl_id')
+    if not crawl_id:
+        return jsonify({'success': False, 'error': 'No crawl selected'})
+    return stop_crawl_by_id(crawl_id)
 
 @app.route('/api/crawl_status')
 @login_required
 def crawl_status():
-    crawler = get_or_create_crawler()
-    settings_manager = get_session_settings()
+    crawl_id = session.get('current_crawl_id')
+    if not crawl_id:
+        crawler = get_or_create_crawler()
+        return jsonify(crawler.get_status())
+
+    from src.crawl_db import get_crawl_by_id
+    crawl = get_crawl_by_id(crawl_id)
+    if not crawl:
+        return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+    if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+    payload = build_crawl_summary(crawl_id)
 
     # Check for incremental update parameters
     url_since = request.args.get('url_since', type=int)
     link_since = request.args.get('link_since', type=int)
     issue_since = request.args.get('issue_since', type=int)
 
-    # Get full status data
-    status_data = crawler.get_status()
-
-    # Ensure baseUrl is in stats (needed for UI to work correctly)
-    if crawler.base_url and 'stats' in status_data:
-        status_data['stats']['baseUrl'] = crawler.base_url
-
-    # Check if we need to force a full refresh (after loading from DB)
-    force_full = session.pop('force_full_refresh', False)
-
-    # If incremental parameters provided AND not forcing full refresh, slice the arrays
-    if not force_full:
-        if url_since is not None:
-            status_data['urls'] = status_data.get('urls', [])[url_since:]
-        if link_since is not None:
-            status_data['links'] = status_data.get('links', [])[link_since:]
-        if issue_since is not None:
-            status_data['issues'] = status_data.get('issues', [])[issue_since:]
-
-    # Apply current issue exclusion patterns to displayed issues
-    issues = status_data.get('issues', [])
-    if issues:
-        current_settings = settings_manager.get_settings()
-        exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
-        exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
-        filtered_issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-        status_data['issues'] = filtered_issues
-
-    return jsonify(status_data)
+    # Legacy shape for old callers, backed by paged DB reads.
+    payload['urls'] = load_crawl_urls_page(crawl_id, limit=500, offset=url_since or 0).get_json().get('urls', [])
+    payload['links'] = load_crawl_links_page(crawl_id, limit=500, offset=link_since or 0).get_json().get('links', [])
+    payload['issues'] = load_crawl_issues_page(crawl_id, limit=500, offset=issue_since or 0).get_json().get('issues', [])
+    return jsonify(payload)
 
 @app.route('/api/visualization_data')
 @login_required
 def visualization_data():
     """Get graph data for site structure visualization"""
     try:
-        crawler = get_or_create_crawler()
-        status_data = crawler.get_status()
-
-        # Get URLs from the status data
-        crawled_pages = status_data.get('urls', [])
-        all_links = status_data.get('links', [])
+        crawl_id = session.get('current_crawl_id')
+        if crawl_id:
+            from src.crawl_db import load_crawled_urls, load_crawl_links
+            crawled_pages = load_crawled_urls(crawl_id, limit=500)
+            all_links = load_crawl_links(crawl_id, limit=2000)
+        else:
+            crawler = get_or_create_crawler()
+            status_data = crawler.get_status()
+            crawled_pages = status_data.get('urls', [])
+            all_links = status_data.get('links', [])
 
         # Build nodes and edges for the graph
         nodes = []
@@ -1028,22 +1092,171 @@ def update_crawler_settings():
 @app.route('/api/pause_crawl', methods=['POST'])
 @login_required
 def pause_crawl():
-    try:
-        crawler = get_or_create_crawler()
-        success, message = crawler.pause_crawl()
-        return jsonify({'success': success, 'message': message})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+    crawl_id = session.get('current_crawl_id')
+    if not crawl_id:
+        return jsonify({'success': False, 'error': 'No crawl selected'})
+    return pause_crawl_by_id(crawl_id)
 
 @app.route('/api/resume_crawl', methods=['POST'])
 @login_required
 def resume_crawl():
+    crawl_id = session.get('current_crawl_id')
+    if not crawl_id:
+        return jsonify({'success': False, 'error': 'No crawl selected'})
+    return resume_crawl_endpoint(crawl_id)
+
+@app.route('/api/crawls/<int:crawl_id>/status')
+@login_required
+def crawl_status_by_id(crawl_id):
+    """Get a small crawl status summary by ID."""
     try:
-        crawler = get_or_create_crawler()
-        success, message = crawler.resume_crawl()
+        from src.crawl_db import get_crawl_by_id
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        summary = build_crawl_summary(crawl_id)
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/urls')
+@login_required
+def load_crawl_urls_page(crawl_id, limit=None, offset=None):
+    """Load one page of crawl URL rows."""
+    try:
+        from src.crawl_db import get_crawl_by_id, get_crawl_counts, load_crawled_urls
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
+        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        counts = get_crawl_counts(crawl_id)
+        return jsonify({
+            'success': True,
+            'crawl_id': crawl_id,
+            'urls': load_crawled_urls(crawl_id, limit=limit, offset=offset),
+            'limit': limit,
+            'offset': offset,
+            'total': counts['urls'],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/links')
+@login_required
+def load_crawl_links_page(crawl_id, limit=None, offset=None):
+    """Load one page of crawl link rows."""
+    try:
+        from src.crawl_db import get_crawl_by_id, get_crawl_counts, load_crawl_links
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
+        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        counts = get_crawl_counts(crawl_id)
+        return jsonify({
+            'success': True,
+            'crawl_id': crawl_id,
+            'links': load_crawl_links(crawl_id, limit=limit, offset=offset),
+            'limit': limit,
+            'offset': offset,
+            'total': counts['links'],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/issues')
+@login_required
+def load_crawl_issues_page(crawl_id, limit=None, offset=None):
+    """Load one page of crawl issue rows."""
+    try:
+        from src.crawl_db import get_crawl_by_id, get_crawl_counts, load_crawl_issues
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
+        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        counts = get_crawl_counts(crawl_id)
+        issues = load_crawl_issues(crawl_id, limit=limit, offset=offset)
+        if issues:
+            current_settings = get_session_settings().get_settings()
+            exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+            exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+            issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+        return jsonify({
+            'success': True,
+            'crawl_id': crawl_id,
+            'issues': issues,
+            'limit': limit,
+            'offset': offset,
+            'total': counts['issues'],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/pause', methods=['POST'])
+@login_required
+def pause_crawl_by_id(crawl_id):
+    """Pause an active crawl."""
+    try:
+        from src.crawl_db import get_crawl_by_id
+
+        crawl = get_crawl_by_id(crawl_id)
+        if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        active = crawl_jobs.get(crawl_id)
+        if not active:
+            return jsonify({'success': False, 'error': 'Crawl is not active'}), 404
+        success, message = active.pause_crawl()
+        session['current_crawl_id'] = crawl_id
         return jsonify({'success': success, 'message': message})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/stop', methods=['POST'])
+@login_required
+def stop_crawl_by_id(crawl_id):
+    """Stop an active crawl."""
+    try:
+        from src.crawl_db import get_crawl_by_id
+
+        crawl = get_crawl_by_id(crawl_id)
+        if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        active = crawl_jobs.get(crawl_id)
+        if not active:
+            return jsonify({'success': False, 'error': 'Crawl is not active'}), 404
+        success, message = active.stop_crawl()
+        crawl_jobs.unregister(crawl_id)
+        session['current_crawl_id'] = crawl_id
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/crawls/list')
 @login_required
@@ -1058,6 +1271,8 @@ def list_crawls():
         status_filter = request.args.get('status')
 
         crawls = get_user_crawls(user_id, limit=limit, offset=offset, status_filter=status_filter)
+        for crawl in crawls:
+            crawl['is_active'] = crawl_jobs.is_active(crawl['id'])
         total_count = get_crawl_count(user_id)
 
         return jsonify({
@@ -1074,6 +1289,7 @@ def get_crawl(crawl_id):
     """Get complete crawl data by ID"""
     try:
         user_id = session.get('user_id')
+        session_id = ensure_session_id()
         from src.crawl_db import get_crawl_by_id, load_crawled_urls, load_crawl_links, load_crawl_issues
 
         # Get crawl metadata
@@ -1081,8 +1297,7 @@ def get_crawl(crawl_id):
         if not crawl:
             return jsonify({'success': False, 'error': 'Crawl not found'}), 404
 
-        # Check ownership (guests have user_id = None)
-        if user_id and crawl.get('user_id') != user_id:
+        if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
         # Load all data
@@ -1108,69 +1323,27 @@ def load_crawl_into_session(crawl_id):
     """Load a historical crawl into the current session"""
     try:
         user_id = session.get('user_id')
-        from src.crawl_db import get_crawl_by_id, load_crawled_urls, load_crawl_links, load_crawl_issues
+        session_id = ensure_session_id()
+        from src.crawl_db import get_crawl_by_id
 
         # Get crawl metadata
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
             return jsonify({'success': False, 'error': 'Crawl not found'}), 404
 
-        # Check ownership
-        if user_id and crawl.get('user_id') != user_id:
+        if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
-        # Get current crawler instance
-        crawler = get_or_create_crawler()
-
-        # Stop any running crawl
-        if crawler.is_running:
-            crawler.stop_crawl()
-
-        # Load all data from database
-        urls = load_crawled_urls(crawl_id)
-        links = load_crawl_links(crawl_id)
-        issues = load_crawl_issues(crawl_id)
-
-        # Inject into current crawler instance
-        with crawler.results_lock:
-            crawler.crawl_results = urls
-            crawler.stats['crawled'] = len(urls)
-            crawler.stats['discovered'] = len(urls)
-            crawler.base_url = crawl['base_url']
-            crawler.base_domain = crawl['base_domain']
-
-        # Load links into link manager
-        if crawler.link_manager:
-            crawler.link_manager.all_links = links
-            # Rebuild links_set
-            crawler.link_manager.links_set.clear()
-            for link in links:
-                link_key = f"{link['source_url']}|{link['target_url']}"
-                crawler.link_manager.links_set.add(link_key)
-
-        # Load issues into issue detector
-        if crawler.issue_detector:
-            crawler.issue_detector.detected_issues = issues
-
-        # Rebuild per-user memory tracker for loaded data
-        crawler.user_memory.reset()
-        crawler._demo_limit_reached = False
-        for url_data in urls:
-            crawler.user_memory.track_url(url_data)
-        if links:
-            crawler.user_memory.track_links(links)
-        if issues:
-            crawler.user_memory.track_issues(issues)
-
-        # Set Flask session flag for force full refresh
-        session['force_full_refresh'] = True
+        counts = build_crawl_summary(crawl_id)['counts']
+        session['current_crawl_id'] = crawl_id
 
         return jsonify({
             'success': True,
-            'message': f'Loaded {len(urls)} URLs, {len(links)} links, {len(issues)} issues',
-            'urls_count': len(urls),
-            'links_count': len(links),
-            'issues_count': len(issues),
+            'message': f'Attached to crawl {crawl_id}',
+            'crawl_id': crawl_id,
+            'urls_count': counts['urls'],
+            'links_count': counts['links'],
+            'issues_count': counts['issues'],
             'should_refresh_ui': True
         })
 
@@ -1185,10 +1358,29 @@ def resume_crawl_endpoint(crawl_id):
     """Resume an interrupted crawl"""
     try:
         user_id = session.get('user_id')
-        session_id = session.get('session_id')
+        session_id = ensure_session_id()
+        from src.crawl_db import get_crawl_by_id
 
-        # Get crawler for this session
-        crawler = get_or_create_crawler()
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        active = crawl_jobs.get(crawl_id)
+        if active:
+            if active.is_paused:
+                success, message = active.resume_crawl()
+            elif active.is_running:
+                success, message = True, 'Crawl already running'
+            else:
+                crawl_jobs.unregister(crawl_id)
+                active = None
+            if active:
+                session['current_crawl_id'] = crawl_id
+                return jsonify({'success': success, 'message': message, 'crawl_id': crawl_id})
+
+        crawler = WebCrawler()
 
         # Enforce demo mode limits on resumed crawls
         if DEMO_MODE:
@@ -1200,8 +1392,9 @@ def resume_crawl_endpoint(crawl_id):
 
         if success:
             session['current_crawl_id'] = crawl_id
+            register_server_crawler(crawler)
 
-        return jsonify({'success': success, 'message': message})
+        return jsonify({'success': success, 'message': message, 'crawl_id': crawl_id})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1213,6 +1406,7 @@ def delete_crawl_endpoint(crawl_id):
     """Delete a crawl and all associated data"""
     try:
         user_id = session.get('user_id')
+        session_id = ensure_session_id()
         from src.crawl_db import delete_crawl, get_crawl_by_id
 
         # Verify ownership
@@ -1220,8 +1414,13 @@ def delete_crawl_endpoint(crawl_id):
         if not crawl:
             return jsonify({'success': False, 'error': 'Crawl not found'}), 404
 
-        if user_id and crawl.get('user_id') != user_id:
+        if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        active = crawl_jobs.get(crawl_id)
+        if active:
+            active.stop_crawl()
+            crawl_jobs.unregister(crawl_id)
 
         success = delete_crawl(crawl_id)
         return jsonify({'success': success, 'message': 'Crawl deleted successfully' if success else 'Failed to delete crawl'})
@@ -1234,6 +1433,7 @@ def archive_crawl(crawl_id):
     """Archive crawl (mark as archived but keep data)"""
     try:
         user_id = session.get('user_id')
+        session_id = ensure_session_id()
         from src.crawl_db import set_crawl_status, get_crawl_by_id
 
         # Verify ownership
@@ -1241,7 +1441,7 @@ def archive_crawl(crawl_id):
         if not crawl:
             return jsonify({'success': False, 'error': 'Crawl not found'}), 404
 
-        if user_id and crawl.get('user_id') != user_id:
+        if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
         success = set_crawl_status(crawl_id, 'archived')
@@ -1289,9 +1489,15 @@ def export_data():
         export_format = data.get('format', 'csv')
         export_fields = data.get('fields', ['url', 'status_code', 'title'])
         local_data = data.get('localData', {})
+        crawl_id = data.get('crawlId') or session.get('current_crawl_id')
 
         # Use local data if provided (from loaded crawl), otherwise get from crawler
-        if local_data and local_data.get('urls'):
+        if crawl_id:
+            from src.crawl_db import load_crawled_urls, load_crawl_links, load_crawl_issues
+            urls = load_crawled_urls(crawl_id)
+            links = load_crawl_links(crawl_id)
+            issues = load_crawl_issues(crawl_id)
+        elif local_data and local_data.get('urls'):
             urls = local_data.get('urls', [])
             links = local_data.get('links', [])
             issues = local_data.get('issues', [])
@@ -1475,6 +1681,18 @@ def graceful_shutdown(signum, frame):
                         set_crawl_status(crawler.crawl_id, 'paused')
                     except Exception as e:
                         print(f"    Error saving crawl {crawler.crawl_id}: {e}")
+
+        for crawl_id in crawl_jobs.list_active_ids():
+            crawler = crawl_jobs.get(crawl_id)
+            if crawler and crawler.is_running and crawler.db_save_enabled:
+                print(f"  → Saving server crawl {crawler.crawl_id}...")
+                try:
+                    crawler._save_batch_to_db(force=True)
+                    crawler._save_queue_checkpoint()
+                    from src.crawl_db import set_crawl_status
+                    set_crawl_status(crawler.crawl_id, 'paused')
+                except Exception as e:
+                    print(f"    Error saving server crawl {crawler.crawl_id}: {e}")
 
         print("All crawls saved successfully")
         print("=" * 60)

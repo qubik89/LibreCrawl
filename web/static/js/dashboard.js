@@ -26,7 +26,6 @@ async function openDashboard() {
             return;
         }
 
-        // Build table
         let html = `
             <table class="data-table" style="width: 100%; table-layout: fixed;">
                 <thead>
@@ -34,6 +33,8 @@ async function openDashboard() {
                         <th style="width: 180px;">Date</th>
                         <th style="width: 200px;">Domain</th>
                         <th style="width: 80px;">URLs</th>
+                        <th style="width: 80px;">Links</th>
+                        <th style="width: 80px;">Issues</th>
                         <th style="width: 100px;">Status</th>
                         <th style="width: 280px;">Actions</th>
                     </tr>
@@ -46,16 +47,22 @@ async function openDashboard() {
             const domain = crawl.base_domain || crawl.base_url;
             const status = crawl.status || 'unknown';
             const statusColor = status === 'completed' ? '#10b981' : status === 'running' ? '#3b82f6' : status === 'paused' ? '#f59e0b' : '#6b7280';
+            const running = crawl.is_active && status === 'running';
+            const paused = crawl.is_active && status === 'paused';
 
             html += `
                 <tr>
                     <td>${date}</td>
                     <td>${domain}</td>
                     <td>${crawl.urls_crawled || 0}</td>
+                    <td>${crawl.link_count || '-'}</td>
+                    <td>${crawl.issue_count || '-'}</td>
                     <td><span style="color: ${statusColor};">${status}</span></td>
                     <td style="white-space: nowrap;">
-                        <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">Load</button>
-                        ${['paused', 'failed', 'running', 'stopped'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Resume</button>` : ''}
+                        <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">View</button>
+                        ${running ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="pauseCrawlFromDashboard(${crawl.id})">Pause</button>` : ''}
+                        ${paused || ['paused', 'failed', 'stopped', 'running'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Resume</button>` : ''}
+                        ${crawl.is_active ? `<button class="btn btn-danger" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="stopCrawlFromDashboard(${crawl.id})">Stop</button>` : ''}
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCrawlFromDashboard(${crawl.id})">Delete</button>
                     </td>
                 </tr>
@@ -83,7 +90,6 @@ async function loadCrawlFromDashboard(crawlId) {
     if (!confirm('Load this crawl? Any unsaved current data will be lost.')) return;
 
     try {
-        // Call backend to load data into current crawler
         const response = await fetch(`/api/crawls/${crawlId}/load`, {
             method: 'POST'
         });
@@ -94,50 +100,8 @@ async function loadCrawlFromDashboard(crawlId) {
             return;
         }
 
-        // Close dashboard
         closeDashboard();
-
-        // Fetch the loaded data
-        const statusResponse = await fetch('/api/crawl_status');
-        const statusData = await statusResponse.json();
-
-        // Clear UI
-        clearAllTables();
-        resetStats();
-
-        // Populate data
-        crawlState.urls = [];
-        crawlState.links = statusData.links || [];
-        crawlState.issues = statusData.issues || [];
-        crawlState.stats = statusData.stats || {};
-        crawlState.baseUrl = statusData.stats?.baseUrl || '';
-
-        // Set URL input
-        if (crawlState.baseUrl) {
-            document.getElementById('urlInput').value = crawlState.baseUrl;
-        }
-
-        // Add URLs to tables
-        if (statusData.urls && statusData.urls.length > 0) {
-            statusData.urls.forEach(url => addUrlToTable(url));
-        }
-
-        // Load links
-        if (statusData.links && statusData.links.length > 0) {
-            crawlState.pendingLinks = statusData.links;
-        }
-
-        // Load issues
-        if (statusData.issues && statusData.issues.length > 0) {
-            crawlState.pendingIssues = statusData.issues;
-        }
-
-        // Update displays
-        updateStatsDisplay();
-        updateFilterCounts();
-        updateStatusCodesTable();
-        updateCrawlButtons();
-        updateStatus(`Loaded: ${statusData.urls?.length || 0} URLs`);
+        await attachToServerCrawl(crawlId);
 
         showNotification('Crawl loaded successfully', 'success');
 
@@ -151,7 +115,6 @@ async function resumeCrawlFromDashboard(crawlId) {
     if (!confirm('Resume this crawl? Any unsaved current data will be lost.')) return;
 
     try {
-        // Call backend to resume
         const response = await fetch(`/api/crawls/${crawlId}/resume`, {
             method: 'POST'
         });
@@ -162,65 +125,47 @@ async function resumeCrawlFromDashboard(crawlId) {
             return;
         }
 
-        // Close dashboard
         closeDashboard();
-
-        // Fetch the loaded data
-        const statusResponse = await fetch('/api/crawl_status');
-        const statusData = await statusResponse.json();
-
-        // Clear UI
-        clearAllTables();
-        resetStats();
-
-        // Populate data
-        crawlState.urls = [];
-        crawlState.links = statusData.links || [];
-        crawlState.issues = statusData.issues || [];
-        crawlState.stats = statusData.stats || {};
-        crawlState.baseUrl = statusData.stats?.baseUrl || '';
-
-        // Set URL input
-        if (crawlState.baseUrl) {
-            document.getElementById('urlInput').value = crawlState.baseUrl;
-        }
-
-        // Add URLs to tables
-        if (statusData.urls && statusData.urls.length > 0) {
-            statusData.urls.forEach(url => addUrlToTable(url));
-        }
-
-        // Load links
-        if (statusData.links && statusData.links.length > 0) {
-            crawlState.pendingLinks = statusData.links;
-        }
-
-        // Load issues
-        if (statusData.issues && statusData.issues.length > 0) {
-            crawlState.pendingIssues = statusData.issues;
-        }
-
-        // Set crawl as running
-        if (statusData.status === 'running') {
-            crawlState.isRunning = true;
-            crawlState.isPaused = false;
-            crawlState.startTime = new Date();
-            showProgress();
-            updateCrawlButtons();
-            pollCrawlProgress();
-        }
-
-        // Update displays
-        updateStatsDisplay();
-        updateFilterCounts();
-        updateStatusCodesTable();
-        updateStatus('Crawl resumed');
+        await attachToServerCrawl(crawlId);
 
         showNotification('Crawl resumed successfully', 'success');
 
     } catch (error) {
         console.error('Error resuming crawl:', error);
         alert('Error resuming crawl');
+    }
+}
+
+async function pauseCrawlFromDashboard(crawlId) {
+    try {
+        const response = await fetch(`/api/crawls/${crawlId}/pause`, { method: 'POST' });
+        const data = await response.json();
+        if (!data.success) {
+            alert('Error pausing crawl: ' + (data.error || data.message));
+            return;
+        }
+        showNotification('Crawl paused', 'success');
+        openDashboard();
+    } catch (error) {
+        console.error('Error pausing crawl:', error);
+        alert('Error pausing crawl');
+    }
+}
+
+async function stopCrawlFromDashboard(crawlId) {
+    if (!confirm('Stop this crawl?')) return;
+    try {
+        const response = await fetch(`/api/crawls/${crawlId}/stop`, { method: 'POST' });
+        const data = await response.json();
+        if (!data.success) {
+            alert('Error stopping crawl: ' + (data.error || data.message));
+            return;
+        }
+        showNotification('Crawl stopped', 'success');
+        openDashboard();
+    } catch (error) {
+        console.error('Error stopping crawl:', error);
+        alert('Error stopping crawl');
     }
 }
 

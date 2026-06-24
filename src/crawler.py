@@ -127,6 +127,7 @@ class WebCrawler:
 
         # Thread reference
         self.crawl_thread = None
+        self.on_finish = None
 
         # Robots.txt cache
         self._robots_cache = {}
@@ -304,12 +305,10 @@ class WebCrawler:
                 self._discover_and_add_sitemap_urls(url)
                 print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
 
-            # Start auto-save thread if DB enabled
-            if self.db_save_enabled:
-                self._start_auto_save_thread()
-
             # Start crawling in separate thread
             self.is_running = True
+            if self.db_save_enabled:
+                self._start_auto_save_thread()
             self.crawl_thread = threading.Thread(target=self._crawl_worker)
             self.crawl_thread.start()
 
@@ -395,6 +394,14 @@ class WebCrawler:
             self.js_renderer = None
 
         return True, "Crawl and PageSpeed analysis stopped"
+
+    def _notify_finished(self):
+        """Notify owner that this crawler no longer needs an active job slot."""
+        if self.on_finish:
+            try:
+                self.on_finish(self)
+            except Exception as e:
+                print(f"Error in crawl finish callback: {e}")
 
     def pause_crawl(self):
         """Pause the current crawl"""
@@ -550,11 +557,9 @@ class WebCrawler:
             # Update status to running
             set_crawl_status(crawl_id, 'running')
 
-            # Start auto-save thread
-            self._start_auto_save_thread()
-
             # Start crawling
             self.is_running = True
+            self._start_auto_save_thread()
             self.crawl_thread = threading.Thread(target=self._crawl_worker)
             self.crawl_thread.start()
 
@@ -858,6 +863,7 @@ class WebCrawler:
 
         # Mark crawl as complete
         self.is_running = False
+        self._notify_finished()
         if self._demo_limit_reached:
             print(f"Crawl stopped (demo limit). User memory: {self.user_memory.total_mb:.0f}MB. Crawled: {self.stats['crawled']}")
         else:
@@ -1274,6 +1280,7 @@ class WebCrawler:
             # Clean up
             await self.js_renderer.cleanup()
             self.is_running = False
+            self._notify_finished()
             print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
 
     def _update_all_linked_from(self):
