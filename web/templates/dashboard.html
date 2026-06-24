@@ -287,13 +287,14 @@
                         <th>URL</th>
                         <th>Status</th>
                         <th>URLs</th>
+                        <th>Progress</th>
                         <th>Duration</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="crawls-tbody">
                     <tr>
-                        <td colspan="6" class="loading">
+                        <td colspan="7" class="loading">
                             <div class="spinner"></div>
                             <div style="margin-top: 16px;">Loading crawls...</div>
                         </td>
@@ -345,13 +346,22 @@
                         const duration = crawl.completed_at
                             ? calculateDuration(crawl.started_at, crawl.completed_at)
                             : 'In progress';
+                        const crawled = crawl.urls_crawled || 0;
+                        const discovered = Math.max(crawl.urls_discovered || 0, crawled);
+                        const progress = discovered ? Math.min(100, (crawled / discovered) * 100) : 0;
 
                         return `
                             <tr>
                                 <td>${started}</td>
                                 <td><a href="${crawl.base_url}" target="_blank" class="url-link">${crawl.base_url}</a></td>
                                 <td><span class="status-badge status-${crawl.status}">${crawl.status}</span></td>
-                                <td>${crawl.urls_crawled || 0}</td>
+                                <td>${crawled}</td>
+                                <td>
+                                    <div style="height: 6px; background: #e5e7eb; border-radius: 999px; overflow: hidden;">
+                                        <div style="height: 100%; width: ${progress}%; background: #3b82f6;"></div>
+                                    </div>
+                                    <div style="font-size: 12px; color: #6b7280; margin-top: 4px;">${discovered ? progress.toFixed(1) + '%' : '-'}</div>
+                                </td>
                                 <td>${duration}</td>
                                 <td class="actions">
                                     ${(crawl.status === 'paused' || crawl.status === 'failed' || crawl.status === 'stopped' || crawl.status === 'running')

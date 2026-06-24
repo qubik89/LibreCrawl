@@ -5,15 +5,23 @@
 let activeReportCrawlId = null;
 let reportPollTimer = null;
 let reportActionsEnabled = false;
+let dashboardRefreshTimer = null;
 
 async function openDashboard() {
     const modal = document.getElementById('dashboardModal');
-    const content = document.getElementById('dashboardContent');
 
     // Show modal
     modal.style.display = 'flex';
 
     reportActionsEnabled = await canUseReportActions();
+    await loadDashboardCrawls();
+    if (!dashboardRefreshTimer) {
+        dashboardRefreshTimer = setInterval(loadDashboardCrawls, 10000);
+    }
+}
+
+async function loadDashboardCrawls() {
+    const content = document.getElementById('dashboardContent');
 
     // Load crawls
     try {
@@ -41,6 +49,7 @@ async function openDashboard() {
                         <th style="width: 80px;">URLs</th>
                         <th style="width: 80px;">Links</th>
                         <th style="width: 80px;">Issues</th>
+                        <th style="width: 160px;">Progress</th>
                         <th style="width: 100px;">Status</th>
                         <th style="width: 360px;">Actions</th>
                     </tr>
@@ -56,14 +65,24 @@ async function openDashboard() {
             const running = crawl.is_active && status === 'running';
             const paused = crawl.is_active && status === 'paused';
             const completed = status === 'completed';
+            const crawled = crawl.urls_crawled || 0;
+            const discovered = Math.max(crawl.urls_discovered || 0, crawled);
+            const progress = discovered ? Math.min(100, (crawled / discovered) * 100) : 0;
+            const progressLabel = discovered ? `${progress.toFixed(1)}%` : '-';
 
             html += `
                 <tr>
                     <td>${date}</td>
                     <td>${domain}</td>
-                    <td>${crawl.urls_crawled || 0}</td>
+                    <td>${crawled}</td>
                     <td>${crawl.link_count || '-'}</td>
                     <td>${crawl.issue_count || '-'}</td>
+                    <td>
+                        <div class="progress-bar" style="height: 6px;">
+                            <div class="progress-fill" style="width: ${progress}%"></div>
+                        </div>
+                        <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">${progressLabel}</div>
+                    </td>
                     <td><span style="color: ${statusColor};">${status}</span></td>
                     <td style="white-space: nowrap;">
                         <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">View</button>
@@ -92,6 +111,10 @@ async function openDashboard() {
 
 function closeDashboard() {
     document.getElementById('dashboardModal').style.display = 'none';
+    if (dashboardRefreshTimer) {
+        clearInterval(dashboardRefreshTimer);
+        dashboardRefreshTimer = null;
+    }
 }
 
 async function canUseReportActions() {
