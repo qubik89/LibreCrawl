@@ -32,6 +32,7 @@ services:
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE:-false}
+      - CRAWL_RESULT_STORAGE=${CRAWL_RESULT_STORAGE:-clickhouse}
       # Uncomment these for SMTP sending
       # - SMTP_HOST=${SMTP_HOST}
       # - SMTP_PORT=${SMTP_PORT}

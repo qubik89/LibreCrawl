@@ -72,6 +72,7 @@ from src.core.sitemap_parser import SitemapParser
 from src.core.issue_detector import IssueDetector
 from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
+from src.crawl_storage import result_storage_mode, should_save_sqlite_rows
 
 
 class WebCrawler:
@@ -630,20 +631,44 @@ class WebCrawler:
             urls_to_save = list(self.unsaved_urls)
             links_to_save = list(self.unsaved_links)
             issues_to_save = list(self.unsaved_issues)
+            has_rows = bool(urls_to_save or links_to_save or issues_to_save)
+            storage_mode = result_storage_mode()
+            sqlite_rows_saved = False
+            clickhouse_rows_saved = False
 
-            # Save URLs
-            if self.unsaved_urls:
-                save_url_batch(self.crawl_id, self.unsaved_urls)
+            if has_rows and storage_mode in ('clickhouse', 'both'):
+                try:
+                    from src.crawl_clickhouse import save_batches
+                    clickhouse_rows_saved = save_batches(
+                        self.crawl_id,
+                        urls=urls_to_save,
+                        links=links_to_save,
+                        issues=issues_to_save
+                    )
+                except Exception as e:
+                    print(f"ClickHouse save failed for crawl {self.crawl_id}: {e}")
+
+            save_rows_to_sqlite = should_save_sqlite_rows(storage_mode, has_rows, clickhouse_rows_saved)
+
+            if save_rows_to_sqlite:
+                # Save URLs
+                if self.unsaved_urls:
+                    save_url_batch(self.crawl_id, self.unsaved_urls)
+                    self.unsaved_urls.clear()
+
+                # Save links
+                if self.unsaved_links:
+                    save_links_batch(self.crawl_id, self.unsaved_links)
+                    self.unsaved_links.clear()
+
+                # Save issues
+                if self.unsaved_issues:
+                    save_issues_batch(self.crawl_id, self.unsaved_issues)
+                    self.unsaved_issues.clear()
+                sqlite_rows_saved = has_rows
+            elif clickhouse_rows_saved:
                 self.unsaved_urls.clear()
-
-            # Save links
-            if self.unsaved_links:
-                save_links_batch(self.crawl_id, self.unsaved_links)
                 self.unsaved_links.clear()
-
-            # Save issues
-            if self.unsaved_issues:
-                save_issues_batch(self.crawl_id, self.unsaved_issues)
                 self.unsaved_issues.clear()
 
             # Update statistics
@@ -657,20 +682,14 @@ class WebCrawler:
                 estimated_size_mb=memory_stats.get('estimated_crawl_mb', 0)
             )
 
-            if urls_to_save or links_to_save or issues_to_save:
-                try:
-                    from src.crawl_clickhouse import save_batches
-                    save_batches(
-                        self.crawl_id,
-                        urls=urls_to_save,
-                        links=links_to_save,
-                        issues=issues_to_save
-                    )
-                except Exception as e:
-                    print(f"ClickHouse mirror failed for crawl {self.crawl_id}: {e}")
-
             self.last_save_time = time.time()
-            print(f"Saved batch to database for crawl {self.crawl_id}")
+            if has_rows:
+                print(
+                    f"Saved batch for crawl {self.crawl_id} "
+                    f"(sqlite_rows={sqlite_rows_saved}, clickhouse_rows={clickhouse_rows_saved})"
+                )
+            else:
+                print(f"Saved crawl stats to database for crawl {self.crawl_id}")
 
         except Exception as e:
             print(f"Error saving batch to database: {e}")
