@@ -46,6 +46,22 @@ services:
     restart: unless-stopped
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.gzip.compress=true
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.routers.http-0-mpzxekpy8qkkf76rc700791e.entryPoints=http
+      - traefik.http.routers.http-0-mpzxekpy8qkkf76rc700791e.middlewares=redirect-to-https
+      - traefik.http.routers.http-0-mpzxekpy8qkkf76rc700791e.rule=Host(`crawl.mitmore.dev`) && PathPrefix(`/`)
+      - traefik.http.routers.http-0-mpzxekpy8qkkf76rc700791e.service=http-0-mpzxekpy8qkkf76rc700791e
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.entryPoints=https
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.middlewares=gzip
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.rule=Host(`crawl.mitmore.dev`) && PathPrefix(`/`)
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.service=https-0-mpzxekpy8qkkf76rc700791e
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.tls.certresolver=letsencrypt
+      - traefik.http.routers.https-0-mpzxekpy8qkkf76rc700791e.tls=true
+      - traefik.http.services.http-0-mpzxekpy8qkkf76rc700791e.loadbalancer.server.port=5000
+      - traefik.http.services.https-0-mpzxekpy8qkkf76rc700791e.loadbalancer.server.port=5000
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
