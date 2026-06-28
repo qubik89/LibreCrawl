@@ -4,14 +4,14 @@ let defaultSettings = {
     // Crawler settings
     maxDepth: 3,
     maxUrls: 5000000,
-    crawlDelay: 1,
+    crawlDelay: 0,
     followRedirects: true,
     crawlExternalLinks: false,
 
     // Request settings
     userAgent: 'MitmoreSEOCrawl/1.0 (Web Crawler)',
     timeout: 10,
-    retries: 3,
+    retries: 1,
     acceptLanguage: 'en-US,en;q=0.9',
     respectRobotsTxt: true,
     allowCookies: true,
@@ -35,7 +35,7 @@ let defaultSettings = {
     exportFields: ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'response_time', 'analytics', 'og_tags', 'json_ld', 'internal_links', 'external_links', 'images'],
 
     // Advanced settings
-    concurrency: 5,
+    concurrency: 20,
     memoryLimit: 512,
     logLevel: 'INFO',
     saveSession: false,

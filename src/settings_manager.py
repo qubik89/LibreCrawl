@@ -75,14 +75,14 @@ class SettingsManager:
             # Crawler settings
             'maxDepth': 3,
             'maxUrls': 5000000,
-            'crawlDelay': 1,
+            'crawlDelay': 0,
             'followRedirects': True,
             'crawlExternalLinks': False,
 
             # Request settings
             'userAgent': 'MitmoreSEOCrawl/1.0 (Web Crawler)',
             'timeout': 10,
-            'retries': 3,
+            'retries': 1,
             'acceptLanguage': 'en-US,en;q=0.9',
             'respectRobotsTxt': True,
             'allowCookies': True,
@@ -106,7 +106,7 @@ class SettingsManager:
             'exportFields': ['url', 'status_code', 'title', 'meta_description', 'h1'],
 
             # Advanced settings
-            'concurrency': 5,
+            'concurrency': 20,
             'memoryLimit': 512,
             'logLevel': 'INFO',
             'saveSession': False,
