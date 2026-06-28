@@ -107,6 +107,7 @@ class WebCrawler:
 
         # Results storage
         self.crawl_results = []
+        self.url_statuses = {}
         self.results_lock = threading.Lock()
 
         # State flags
@@ -140,8 +141,10 @@ class WebCrawler:
         self.crawl_id = crawl_id
         self.resume_mode = resume_from_db
         self.auto_save_interval = 30  # seconds
+        self.queue_checkpoint_interval = 300  # seconds
         self.batch_save_size = 50  # URLs before triggering save
         self.last_save_time = time.time()
+        self.last_queue_checkpoint_time = 0
         self.unsaved_urls = []
         self.unsaved_links = []
         self.unsaved_issues = []
@@ -344,6 +347,7 @@ class WebCrawler:
             self.issue_detector.reset()
 
         self.crawl_results.clear()
+        self.url_statuses.clear()
         self.stats = {
             'discovered': 0,
             'crawled': 0,
@@ -413,7 +417,7 @@ class WebCrawler:
         # Save checkpoint when pausing
         if self.db_save_enabled and self.crawl_id:
             self._save_batch_to_db(force=True)
-            self._save_queue_checkpoint()
+            self._save_queue_checkpoint(force=True)
             from src.crawl_db import set_crawl_status
             set_crawl_status(self.crawl_id, 'paused')
 
@@ -477,6 +481,11 @@ class WebCrawler:
 
             print(f"Loading crawled data from database...")
             self.crawl_results = load_crawled_urls(crawl_id)
+            self.url_statuses = {
+                row.get('url'): row.get('status_code')
+                for row in self.crawl_results
+                if row.get('url')
+            }
 
             # Mark all crawled URLs as discovered to prevent re-discovery
             for url_data in self.crawl_results:
@@ -704,9 +713,11 @@ class WebCrawler:
             import traceback
             traceback.print_exc()
 
-    def _save_queue_checkpoint(self):
+    def _save_queue_checkpoint(self, force=False):
         """Save current queue state for crash recovery"""
         if not self.db_save_enabled or not self.crawl_id or not self.link_manager:
+            return
+        if not force and time.time() - self.last_queue_checkpoint_time < self.queue_checkpoint_interval:
             return
 
         from src.crawl_db import replace_crawl_queue, save_checkpoint
@@ -718,18 +729,13 @@ class WebCrawler:
                 discovered_urls = list(self.link_manager.discovered_urls)
                 replace_crawl_queue(self.crawl_id, discovered_urls)
 
-            # Get visited URLs
-            visited_urls = []
-            if hasattr(self.link_manager, 'visited_urls'):
-                visited_urls = list(self.link_manager.visited_urls)
-
             checkpoint = {
                 'discovered_urls': discovered_urls[:1000],
-                'visited_urls': visited_urls,
                 'pending_count': self.link_manager.get_stats().get('pending', 0)
             }
 
             save_checkpoint(self.crawl_id, checkpoint)
+            self.last_queue_checkpoint_time = time.time()
             print(f"Saved queue checkpoint for crawl {self.crawl_id}")
 
         except Exception as e:
@@ -828,6 +834,7 @@ class WebCrawler:
                                 if result:
                                     with self.results_lock:
                                         self.crawl_results.append(result)
+                                        self.url_statuses[result['url']] = result.get('status_code')
                                         self.stats['crawled'] += 1
                                         self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                         print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
@@ -1029,7 +1036,7 @@ class WebCrawler:
 
                 # Collect all links
                 links_before = len(self.link_manager.all_links)
-                self.link_manager.collect_all_links(soup, url, self.crawl_results)
+                self.link_manager.collect_all_links(soup, url, self.url_statuses)
                 links_after = len(self.link_manager.all_links)
 
                 # Track + batch new links
@@ -1163,7 +1170,7 @@ class WebCrawler:
 
             # Collect all links
             links_before = len(self.link_manager.all_links)
-            self.link_manager.collect_all_links(soup, url, self.crawl_results)
+            self.link_manager.collect_all_links(soup, url, self.url_statuses)
             links_after = len(self.link_manager.all_links)
 
             # Track + batch new links
@@ -1257,6 +1264,7 @@ class WebCrawler:
                             if result:
                                 with self.results_lock:
                                     self.crawl_results.append(result)
+                                    self.url_statuses[result['url']] = result.get('status_code')
                                     self.stats['crawled'] += 1
                                     self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                     print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")

@@ -57,6 +57,11 @@ class LinkManager:
     def collect_all_links(self, soup, source_url, crawl_results):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
+        status_lookup = crawl_results if hasattr(crawl_results, 'get') else {
+            result.get('url'): result.get('status_code')
+            for result in crawl_results
+            if result.get('url')
+        }
 
         for link in links:
             href = link['href'].strip()
@@ -85,12 +90,7 @@ class LinkManager:
                 base_domain_clean = self.base_domain.replace('www.', '', 1)
                 is_internal = target_domain_clean == base_domain_clean
 
-                # Find the status of the target URL if we've crawled it
-                target_status = None
-                for result in crawl_results:
-                    if result['url'] == clean_url:
-                        target_status = result['status_code']
-                        break
+                target_status = status_lookup.get(clean_url) if status_lookup is not None else None
 
                 # Determine placement (navigation, footer, body)
                 placement = self._detect_link_placement(link)
@@ -148,11 +148,7 @@ class LinkManager:
                 base_domain_clean = self.base_domain.replace('www.', '', 1)
                 is_internal = target_domain_clean == base_domain_clean
 
-                target_status = None
-                for result in crawl_results:
-                    if result['url'] == clean_url:
-                        target_status = result['status_code']
-                        break
+                target_status = status_lookup.get(clean_url) if status_lookup is not None else None
 
                 link_data = {
                     'source_url': source_url,

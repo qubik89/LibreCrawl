@@ -2184,7 +2184,7 @@ def graceful_shutdown(signum, frame):
                     print(f"  → Saving crawl {crawler.crawl_id}...")
                     try:
                         crawler._save_batch_to_db(force=True)
-                        crawler._save_queue_checkpoint()
+                        crawler._save_queue_checkpoint(force=True)
                         from src.crawl_db import set_crawl_status
                         set_crawl_status(crawler.crawl_id, 'paused')
                     except Exception as e:
@@ -2196,7 +2196,7 @@ def graceful_shutdown(signum, frame):
                 print(f"  → Saving server crawl {crawler.crawl_id}...")
                 try:
                     crawler._save_batch_to_db(force=True)
-                    crawler._save_queue_checkpoint()
+                    crawler._save_queue_checkpoint(force=True)
                     from src.crawl_db import set_crawl_status
                     set_crawl_status(crawler.crawl_id, 'paused')
                 except Exception as e:
