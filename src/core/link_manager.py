@@ -64,6 +64,7 @@ class LinkManager:
         }
         allowed_placements = set(allowed_placements or [])
         saved_count = 0
+        new_links = []
 
         for link in links:
             href = link['href'].strip()
@@ -123,16 +124,17 @@ class LinkManager:
                     if link_key not in self.links_set:
                         self.links_set.add(link_key)
                         self.all_links.append(link_data)
+                        new_links.append(link_data)
                         saved_count += 1
                         if max_links and saved_count >= max_links:
-                            return
+                            return new_links
 
             except Exception:
                 continue
 
         # Also collect <img src> as links so broken images are discoverable
         if allowed_placements and 'image' not in allowed_placements:
-            return
+            return new_links
 
         imgs = soup.find_all('img', src=True)
         for img in imgs:
@@ -175,12 +177,14 @@ class LinkManager:
                     if link_key not in self.links_set:
                         self.links_set.add(link_key)
                         self.all_links.append(link_data)
+                        new_links.append(link_data)
                         saved_count += 1
                         if max_links and saved_count >= max_links:
-                            return
+                            return new_links
 
             except Exception:
                 continue
+        return new_links
 
     def _detect_link_placement(self, link_element):
         """Detect where on the page a link is placed"""

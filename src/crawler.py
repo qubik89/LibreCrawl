@@ -1122,20 +1122,16 @@ class WebCrawler:
 
                 if self.config.get('persist_links', True):
                     # Collect all links
-                    links_before = len(self.link_manager.all_links)
-                    self.link_manager.collect_all_links(
+                    new_links = self.link_manager.collect_all_links(
                         soup,
                         url,
                         self.url_statuses,
                         allowed_placements=self.config.get('link_placements'),
                         max_links=self.config.get('max_links_per_page'),
                     )
-                    links_after = len(self.link_manager.all_links)
 
                     # Track + batch new links
-                    if links_after > links_before:
-                        new_links = self.link_manager.all_links[links_before:links_after]
-
+                    if new_links:
                         # HEAD-check image URLs for broken image detection
                         image_links = [l for l in new_links if l.get('placement') == 'image']
                         if image_links:
@@ -1263,20 +1259,16 @@ class WebCrawler:
 
             if self.config.get('persist_links', True):
                 # Collect all links
-                links_before = len(self.link_manager.all_links)
-                self.link_manager.collect_all_links(
+                new_links = self.link_manager.collect_all_links(
                     soup,
                     url,
                     self.url_statuses,
                     allowed_placements=self.config.get('link_placements'),
                     max_links=self.config.get('max_links_per_page'),
                 )
-                links_after = len(self.link_manager.all_links)
 
                 # Track + batch new links
-                if links_after > links_before:
-                    new_links = self.link_manager.all_links[links_before:links_after]
-
+                if new_links:
                     # HEAD-check image URLs for broken image detection
                     image_links = [l for l in new_links if l.get('placement') == 'image']
                     if image_links:

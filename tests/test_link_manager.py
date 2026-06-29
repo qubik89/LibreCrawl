@@ -70,6 +70,17 @@ class LinkManagerTests(unittest.TestCase):
             ['https://example.com/one', 'https://example.com/two'],
         )
 
+    def test_collect_all_links_returns_only_current_new_links(self):
+        manager = LinkManager('example.com')
+        first = BeautifulSoup('<main><a href="/one">One</a></main>', 'html.parser')
+        second = BeautifulSoup('<main><a href="/two">Two</a></main>', 'html.parser')
+
+        first_links = manager.collect_all_links(first, 'https://example.com/a', {})
+        second_links = manager.collect_all_links(second, 'https://example.com/b', {})
+
+        self.assertEqual([link['target_url'] for link in first_links], ['https://example.com/one'])
+        self.assertEqual([link['target_url'] for link in second_links], ['https://example.com/two'])
+
 
 if __name__ == '__main__':
     unittest.main()
