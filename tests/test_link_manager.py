@@ -81,6 +81,48 @@ class LinkManagerTests(unittest.TestCase):
         self.assertEqual([link['target_url'] for link in first_links], ['https://example.com/one'])
         self.assertEqual([link['target_url'] for link in second_links], ['https://example.com/two'])
 
+    def test_apply_collected_links_dedupes_caps_and_adds_status(self):
+        manager = LinkManager('example.com')
+        candidates = [
+            {
+                'source_url': 'https://example.com/source',
+                'target_url': 'https://example.com/one',
+                'anchor_text': 'One',
+                'is_internal': True,
+                'target_domain': 'example.com',
+                'target_status': None,
+                'placement': 'body',
+            },
+            {
+                'source_url': 'https://example.com/source',
+                'target_url': 'https://example.com/one',
+                'anchor_text': 'One again',
+                'is_internal': True,
+                'target_domain': 'example.com',
+                'target_status': None,
+                'placement': 'body',
+            },
+            {
+                'source_url': 'https://example.com/source',
+                'target_url': 'https://example.com/two',
+                'anchor_text': 'Two',
+                'is_internal': True,
+                'target_domain': 'example.com',
+                'target_status': None,
+                'placement': 'body',
+            },
+        ]
+
+        links = manager.apply_collected_links(
+            candidates,
+            {'https://example.com/one': 200, 'https://example.com/two': 404},
+            max_links=2,
+        )
+
+        self.assertEqual([link['target_url'] for link in links], ['https://example.com/one', 'https://example.com/two'])
+        self.assertEqual([link['target_status'] for link in links], [200, 404])
+        self.assertEqual(manager.get_source_pages('https://example.com/one'), ['https://example.com/source'])
+
 
 if __name__ == '__main__':
     unittest.main()

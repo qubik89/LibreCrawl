@@ -156,6 +156,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 'CRAWL_LINK_PLACEMENTS',
                 'CRAWL_MAX_LINKS_PER_PAGE',
                 'CRAWL_ENABLE_DUPLICATION_CHECK',
+                'CRAWL_HTML_PROCESS_WORKERS',
             )
         }
         crawl_data = {
@@ -185,6 +186,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             os.environ['CRAWL_LINK_PLACEMENTS'] = 'body,image'
             os.environ['CRAWL_MAX_LINKS_PER_PAGE'] = '75'
             os.environ['CRAWL_ENABLE_DUPLICATION_CHECK'] = 'false'
+            os.environ['CRAWL_HTML_PROCESS_WORKERS'] = '12'
 
             crawler = WebCrawler()
             with (
@@ -206,6 +208,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             self.assertEqual(crawler.config['link_placements'], ['body', 'image'])
             self.assertEqual(crawler.config['max_links_per_page'], 75)
             self.assertFalse(crawler.config['enable_duplication_check'])
+            self.assertEqual(crawler.config['html_process_workers'], 12)
             load_links.assert_not_called()
         finally:
             for key, value in old_env.items():

@@ -7,12 +7,13 @@ import os
 import socket
 import ssl
 import threading
+import multiprocessing
 import time
 import asyncio
 import re
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from urllib.robotparser import RobotFileParser
 import nest_asyncio
 
@@ -73,6 +74,7 @@ from src.core.sitemap_parser import SitemapParser
 from src.core.issue_detector import IssueDetector
 from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
+from src.core.html_analyzer import analyze_html_content
 from src.crawl_storage import result_storage_mode, should_save_sqlite_rows
 
 
@@ -181,6 +183,7 @@ class WebCrawler:
         self.db_save_lock = threading.Lock()
         self.auto_save_thread = None
         self.db_save_enabled = False  # Only enable when crawl_id is set
+        self.html_process_pool = None
 
         # Enable nested asyncio for thread compatibility
         nest_asyncio.apply()
@@ -214,6 +217,7 @@ class WebCrawler:
             'persist_links': True,
             'link_placements': None,
             'max_links_per_page': 0,
+            'html_process_workers': 0,
             'memory_limit': 512 * 1024 * 1024,
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -862,6 +866,12 @@ class WebCrawler:
             0,
             10000,
         )
+        self.config['html_process_workers'] = _env_int(
+            'CRAWL_HTML_PROCESS_WORKERS',
+            self.config.get('html_process_workers', 0),
+            0,
+            max(1, os.cpu_count() or 1),
+        )
         self.batch_save_size = _env_int(
             'CRAWL_BATCH_SAVE_SIZE',
             self.batch_save_size,
@@ -875,6 +885,19 @@ class WebCrawler:
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
 
+    def _start_html_process_pool(self):
+        workers = int(self.config.get('html_process_workers') or 0)
+        if workers > 0 and not self.html_process_pool:
+            self.html_process_pool = ProcessPoolExecutor(
+                max_workers=workers,
+                mp_context=multiprocessing.get_context('spawn'),
+            )
+
+    def _stop_html_process_pool(self):
+        if self.html_process_pool:
+            self.html_process_pool.shutdown(wait=True, cancel_futures=True)
+            self.html_process_pool = None
+
     def _crawl_worker(self):
         """Main crawling worker with smooth rate limiting"""
         # Use async approach if JavaScript rendering is enabled
@@ -885,95 +908,99 @@ class WebCrawler:
 
         # Traditional HTTP crawling with smooth rate limiting
         max_workers = self.config.get('concurrency', 5)
+        self._start_html_process_pool()
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            active_futures = {}
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                active_futures = {}
 
-            while self.is_running:
-                try:
-                    # Check if paused
-                    if self.is_paused:
-                        time.sleep(1)
-                        continue
-
-                    # Submit new tasks - fill ALL available slots, apply rate limiting per task
-                    while (len(active_futures) < max_workers and
-                           self.stats['crawled'] < self.config['max_urls']):
-
-                        url_info = self.link_manager.get_next_url()
-                        if not url_info:
-                            break
-
-                        current_url, depth = url_info
-
-                        # Skip if depth exceeded
-                        if depth > self.config['max_depth']:
+                while self.is_running:
+                    try:
+                        # Check if paused
+                        if self.is_paused:
+                            time.sleep(1)
                             continue
 
-                        # Submit crawl task immediately - rate limiting happens inside the worker
-                        self._log_verbose(f"Submitting task for: {current_url}")
-                        future = executor.submit(self._crawl_url, current_url, depth)
-                        active_futures[future] = current_url
+                        # Submit new tasks - fill ALL available slots, apply rate limiting per task
+                        while (len(active_futures) < max_workers and
+                               self.stats['crawled'] < self.config['max_urls']):
 
-                    # Process completed tasks
-                    completed_futures = []
-                    for future in list(active_futures.keys()):
-                        if future.done():
-                            completed_futures.append(future)
-                            try:
-                                result = future.result()
-                                if result:
-                                    with self.results_lock:
-                                        self.crawl_results.append(result)
-                                        self.url_statuses[result['url']] = result.get('status_code')
-                                        self.stats['crawled'] += 1
-                                        self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-                                        self._log_verbose(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
+                            url_info = self.link_manager.get_next_url()
+                            if not url_info:
+                                break
 
-                                    # Track per-user memory
-                                    self.user_memory.track_url(result)
+                            current_url, depth = url_info
 
-                                    # Detect issues
-                                    issues_before = len(self.issue_detector.detected_issues)
-                                    self.issue_detector.detect_issues(result)
-                                    issues_after = len(self.issue_detector.detected_issues)
+                            # Skip if depth exceeded
+                            if depth > self.config['max_depth']:
+                                continue
 
-                                    # Track + batch new issues
-                                    if issues_after > issues_before:
-                                        new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
-                                        self.user_memory.track_issues(new_issues)
-                                        if self.db_save_enabled:
-                                            self.unsaved_issues.extend(new_issues)
-                            except Exception as e:
-                                print(f"Error in crawl task: {e}")
+                            # Submit crawl task immediately - rate limiting happens inside the worker
+                            self._log_verbose(f"Submitting task for: {current_url}")
+                            future = executor.submit(self._crawl_url, current_url, depth)
+                            active_futures[future] = current_url
 
-                    # Remove completed futures
-                    for future in completed_futures:
-                        del active_futures[future]
+                        # Process completed tasks
+                        completed_futures = []
+                        for future in list(active_futures.keys()):
+                            if future.done():
+                                completed_futures.append(future)
+                                try:
+                                    result = future.result()
+                                    if result:
+                                        with self.results_lock:
+                                            self.crawl_results.append(result)
+                                            self.url_statuses[result['url']] = result.get('status_code')
+                                            self.stats['crawled'] += 1
+                                            self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
+                                            self._log_verbose(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
 
-                    # Demo mode: check per-user memory limit
-                    if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
-                        self._log_verbose(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
-                        self._demo_limit_reached = True
-                        break
+                                        # Track per-user memory
+                                        self.user_memory.track_url(result)
 
-                    # Check for completion
-                    if self.stats['crawled'] >= self.config['max_urls']:
-                        self._log_verbose(f"Reached maximum URLs limit ({self.config['max_urls']})")
-                        break
+                                        # Detect issues
+                                        issues_before = len(self.issue_detector.detected_issues)
+                                        self.issue_detector.detect_issues(result)
+                                        issues_after = len(self.issue_detector.detected_issues)
 
-                    # Check if no more work
-                    link_stats = self.link_manager.get_stats()
-                    if link_stats['pending'] == 0 and len(active_futures) == 0:
-                        self._log_verbose("No more URLs to crawl")
-                        break
+                                        # Track + batch new issues
+                                        if issues_after > issues_before:
+                                            new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                                            self.user_memory.track_issues(new_issues)
+                                            if self.db_save_enabled:
+                                                self.unsaved_issues.extend(new_issues)
+                                except Exception as e:
+                                    print(f"Error in crawl task: {e}")
 
-                    # Tiny sleep only to yield CPU
-                    time.sleep(0.001)
+                        # Remove completed futures
+                        for future in completed_futures:
+                            del active_futures[future]
 
-                except Exception as e:
-                    print(f"Error in crawl worker: {e}")
-                    time.sleep(1)
+                        # Demo mode: check per-user memory limit
+                        if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
+                            self._log_verbose(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
+                            self._demo_limit_reached = True
+                            break
+
+                        # Check for completion
+                        if self.stats['crawled'] >= self.config['max_urls']:
+                            self._log_verbose(f"Reached maximum URLs limit ({self.config['max_urls']})")
+                            break
+
+                        # Check if no more work
+                        link_stats = self.link_manager.get_stats()
+                        if link_stats['pending'] == 0 and len(active_futures) == 0:
+                            self._log_verbose("No more URLs to crawl")
+                            break
+
+                        # Tiny sleep only to yield CPU
+                        time.sleep(0.001)
+
+                    except Exception as e:
+                        print(f"Error in crawl worker: {e}")
+                        time.sleep(1)
+        finally:
+            self._stop_html_process_pool()
 
         # Skip post-processing if demo limit was hit — no further memory use
         if not self._demo_limit_reached:
@@ -1018,6 +1045,27 @@ class WebCrawler:
             return asyncio.run(self._crawl_url_with_javascript(url, depth))
         else:
             return self._crawl_url_with_requests(url, depth)
+
+    def _analyze_html_content(self, response, url, depth, is_internal):
+        args = (
+            response.content,
+            url,
+            depth,
+            response.status_code,
+            response.headers.get('content-type', '').split(';')[0],
+            is_internal,
+            self.base_domain,
+            response.encoding,
+            self.config.get('persist_links', True),
+            self.config.get('link_placements'),
+        )
+        if not self.html_process_pool:
+            return analyze_html_content(*args)
+        try:
+            return self.html_process_pool.submit(analyze_html_content, *args).result()
+        except Exception as e:
+            print(f"HTML process analysis failed: {e}")
+            return analyze_html_content(*args)
 
     def _crawl_url_with_requests(self, url, depth):
         """Crawl a single URL using traditional HTTP requests"""
@@ -1111,33 +1159,17 @@ class WebCrawler:
 
             # Only parse HTML content
             if 'text/html' in response.headers.get('content-type', ''):
-                soup = BeautifulSoup(response.content, 'html.parser')
-
-                # Extract comprehensive data using SEO extractor
-                self.seo_extractor.extract_basic_seo_data(soup, result)
-                self.seo_extractor.extract_meta_tags(soup, result)
-                self.seo_extractor.extract_opengraph_tags(soup, result)
-                self.seo_extractor.extract_twitter_tags(soup, result)
-                self.seo_extractor.extract_json_ld(soup, result)
-                self.seo_extractor.extract_analytics_tracking(soup, response.text, result)
-                self.seo_extractor.extract_images(soup, url, result)
-                self.seo_extractor.extract_link_counts(soup, result, self.base_domain)
-                self.seo_extractor.extract_hreflang(soup, result)
-                self.seo_extractor.extract_schema_org(soup, result)
+                analysis = self._analyze_html_content(response, url, depth, is_internal)
+                result = analysis['result']
 
                 if self.config.get('persist_links', True):
-                    # Collect all links
-                    new_links = self.link_manager.collect_all_links(
-                        soup,
-                        url,
+                    new_links = self.link_manager.apply_collected_links(
+                        analysis.get('links', []),
                         self.url_statuses,
-                        allowed_placements=self.config.get('link_placements'),
                         max_links=self.config.get('max_links_per_page'),
                     )
 
-                    # Track + batch new links
                     if new_links:
-                        # HEAD-check image URLs for broken image detection
                         image_links = [l for l in new_links if l.get('placement') == 'image']
                         if image_links:
                             self._check_image_statuses(image_links)
@@ -1154,14 +1186,17 @@ class WebCrawler:
                         if self.db_save_enabled:
                             self.unsaved_links.extend(new_links)
 
-                # Extract links for further crawling
                 should_extract = (
                     (is_internal and depth < self.config['max_depth']) or
                     (self.config['crawl_external'] and depth < self.config['max_depth'])
                 )
 
                 if should_extract:
-                    self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
+                    self.link_manager.apply_discovered_urls(
+                        analysis.get('discovered_urls', []),
+                        url,
+                        self._should_crawl_url,
+                    )
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)

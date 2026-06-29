@@ -186,6 +186,59 @@ class LinkManager:
                 continue
         return new_links
 
+    def apply_collected_links(self, link_candidates, status_lookup=None, max_links=None):
+        """Add links extracted outside this manager and return only newly saved links."""
+        status_lookup = status_lookup or {}
+        new_links = []
+
+        for candidate in link_candidates:
+            link_data = dict(candidate)
+            clean_url = link_data.get('target_url')
+            source_url = link_data.get('source_url')
+            if not clean_url or not source_url:
+                continue
+
+            link_data['target_status'] = status_lookup.get(clean_url)
+
+            with self.urls_lock:
+                if clean_url not in self.source_pages:
+                    self.source_pages[clean_url] = []
+                if source_url not in self.source_pages[clean_url]:
+                    self.source_pages[clean_url].append(source_url)
+
+            with self.links_lock:
+                link_key = f"{source_url}|{clean_url}"
+                if link_key in self.links_set:
+                    continue
+                self.links_set.add(link_key)
+                self.all_links.append(link_data)
+                new_links.append(link_data)
+                if max_links and len(new_links) >= max_links:
+                    return new_links
+
+        return new_links
+
+    def apply_discovered_urls(self, discovered_urls, source_url, should_crawl_callback):
+        """Queue crawl URLs extracted outside this manager."""
+        for item in discovered_urls:
+            clean_url = item.get('url')
+            depth = item.get('depth')
+            if not clean_url:
+                continue
+
+            with self.urls_lock:
+                if clean_url not in self.source_pages:
+                    self.source_pages[clean_url] = []
+                if source_url not in self.source_pages[clean_url]:
+                    self.source_pages[clean_url].append(source_url)
+
+                if (clean_url not in self.visited_urls and
+                    clean_url not in self.all_discovered_urls and
+                    clean_url != source_url):
+                    if should_crawl_callback(clean_url):
+                        self.all_discovered_urls.add(clean_url)
+                        self.discovered_urls.append((clean_url, depth))
+
     def _detect_link_placement(self, link_element):
         """Detect where on the page a link is placed"""
         # Check parent elements up the tree
