@@ -8,6 +8,7 @@ import time
 _client = None
 _ready = False
 _lock = threading.Lock()
+_thread_local = threading.local()
 
 
 def enabled():
@@ -58,13 +59,14 @@ def get_client():
         return None
 
     with _lock:
-        if _client and _ready:
-            return _client
+        client = getattr(_thread_local, 'client', None)
+        if client and getattr(_thread_local, 'ready', False):
+            return client
 
         try:
             import clickhouse_connect
 
-            _client = clickhouse_connect.get_client(
+            client = clickhouse_connect.get_client(
                 host=_setting('CLICKHOUSE_HOST', 'clickhouse'),
                 port=int(_setting('CLICKHOUSE_PORT', '8123')),
                 username=_setting('CLICKHOUSE_USER', 'default'),
@@ -73,11 +75,16 @@ def get_client():
                 connect_timeout=int(_setting('CLICKHOUSE_CONNECT_TIMEOUT', '5')),
                 send_receive_timeout=int(_setting('CLICKHOUSE_TIMEOUT', '30')),
             )
-            ensure_schema(_client)
+            ensure_schema(client)
+            _thread_local.client = client
+            _thread_local.ready = True
+            _client = client
             _ready = True
-            return _client
+            return client
         except Exception as e:
             print(f'ClickHouse unavailable: {e}')
+            _thread_local.client = None
+            _thread_local.ready = False
             _client = None
             _ready = False
             return None

@@ -148,6 +148,7 @@ class WebCrawler:
         self.unsaved_urls = []
         self.unsaved_links = []
         self.unsaved_issues = []
+        self.db_save_lock = threading.Lock()
         self.auto_save_thread = None
         self.db_save_enabled = False  # Only enable when crawl_id is set
 
@@ -642,6 +643,10 @@ class WebCrawler:
         if not self.db_save_enabled or not self.crawl_id:
             return
 
+        with self.db_save_lock:
+            self._save_batch_to_db_locked(force=force)
+
+    def _save_batch_to_db_locked(self, force=False):
         from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
 
         try:

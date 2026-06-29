@@ -1,4 +1,7 @@
 import os
+import sys
+import threading
+import types
 import unittest
 
 from src import crawl_clickhouse
@@ -42,6 +45,52 @@ class CrawlClickHouseTest(unittest.TestCase):
         issue = crawl_clickhouse.issue_rows(1, [{'url': 'u', 'type': 'warning'}], base_order=1)[0]
         self.assertEqual(issue[2], 'u')
         self.assertEqual(issue[3], 'warning')
+
+    def test_client_is_thread_local(self):
+        old_enabled = os.environ.get('CLICKHOUSE_ENABLED')
+        old_module = sys.modules.get('clickhouse_connect')
+        old_client = crawl_clickhouse._client
+        old_ready = crawl_clickhouse._ready
+        clients = []
+
+        class FakeClient:
+            def command(self, _sql):
+                return None
+
+        def get_client(**_kwargs):
+            client = FakeClient()
+            clients.append(client)
+            return client
+
+        try:
+            os.environ['CLICKHOUSE_ENABLED'] = 'true'
+            sys.modules['clickhouse_connect'] = types.SimpleNamespace(get_client=get_client)
+            crawl_clickhouse._client = None
+            crawl_clickhouse._ready = False
+
+            seen = []
+            threads = [
+                threading.Thread(target=lambda: seen.append(crawl_clickhouse.get_client()))
+                for _ in range(2)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(len(clients), 2)
+            self.assertIsNot(seen[0], seen[1])
+        finally:
+            if old_enabled is None:
+                os.environ.pop('CLICKHOUSE_ENABLED', None)
+            else:
+                os.environ['CLICKHOUSE_ENABLED'] = old_enabled
+            if old_module is None:
+                sys.modules.pop('clickhouse_connect', None)
+            else:
+                sys.modules['clickhouse_connect'] = old_module
+            crawl_clickhouse._client = old_client
+            crawl_clickhouse._ready = old_ready
 
 
 if __name__ == '__main__':

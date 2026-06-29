@@ -21,9 +21,9 @@ class CrawlStorageTest(unittest.TestCase):
             else:
                 os.environ.pop('CRAWL_RESULT_STORAGE', None)
 
-    def test_clickhouse_mode_skips_sqlite_only_after_clickhouse_save(self):
+    def test_clickhouse_mode_never_falls_back_to_sqlite_rows(self):
         self.assertFalse(should_save_sqlite_rows('clickhouse', True, True))
-        self.assertTrue(should_save_sqlite_rows('clickhouse', True, False))
+        self.assertFalse(should_save_sqlite_rows('clickhouse', True, False))
         self.assertTrue(should_save_sqlite_rows('both', True, True))
         self.assertTrue(should_save_sqlite_rows('sqlite', True, False))
 

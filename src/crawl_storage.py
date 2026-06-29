@@ -7,4 +7,4 @@ def result_storage_mode():
 
 
 def should_save_sqlite_rows(storage_mode, has_rows, clickhouse_rows_saved):
-    return storage_mode in ('sqlite', 'both') or (has_rows and not clickhouse_rows_saved)
+    return has_rows and storage_mode in ('sqlite', 'both')
