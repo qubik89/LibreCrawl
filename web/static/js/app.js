@@ -1464,7 +1464,7 @@ function updateFilterCounts() {
         ].forEach(key => {
             const element = document.getElementById(key + '-count');
             if (element) {
-                element.textContent = aggregateCounts[key] || 0;
+                element.textContent = formatNumber(aggregateCounts[key]);
             }
         });
         return;
