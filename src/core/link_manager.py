@@ -54,7 +54,7 @@ class LinkManager:
                         self.all_discovered_urls.add(clean_url)
                         self.discovered_urls.append((clean_url, depth))
 
-    def collect_all_links(self, soup, source_url, crawl_results, allowed_placements=None):
+    def collect_all_links(self, soup, source_url, crawl_results, allowed_placements=None, max_links=None):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
         status_lookup = crawl_results if hasattr(crawl_results, 'get') else {
@@ -63,6 +63,7 @@ class LinkManager:
             if result.get('url')
         }
         allowed_placements = set(allowed_placements or [])
+        saved_count = 0
 
         for link in links:
             href = link['href'].strip()
@@ -122,6 +123,9 @@ class LinkManager:
                     if link_key not in self.links_set:
                         self.links_set.add(link_key)
                         self.all_links.append(link_data)
+                        saved_count += 1
+                        if max_links and saved_count >= max_links:
+                            return
 
             except Exception:
                 continue
@@ -171,6 +175,9 @@ class LinkManager:
                     if link_key not in self.links_set:
                         self.links_set.add(link_key)
                         self.all_links.append(link_data)
+                        saved_count += 1
+                        if max_links and saved_count >= max_links:
+                            return
 
             except Exception:
                 continue

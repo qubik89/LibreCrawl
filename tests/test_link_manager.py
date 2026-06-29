@@ -50,6 +50,26 @@ class LinkManagerTests(unittest.TestCase):
 
         self.assertEqual([link['target_url'] for link in manager.all_links], ['https://example.com/body'])
 
+    def test_collect_all_links_can_cap_links_per_page(self):
+        manager = LinkManager('example.com')
+        soup = BeautifulSoup(
+            '<main><a href="/one">One</a><a href="/two">Two</a><a href="/three">Three</a></main>',
+            'html.parser',
+        )
+
+        manager.collect_all_links(
+            soup,
+            'https://example.com/source',
+            {},
+            allowed_placements=['body'],
+            max_links=2,
+        )
+
+        self.assertEqual(
+            [link['target_url'] for link in manager.all_links],
+            ['https://example.com/one', 'https://example.com/two'],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

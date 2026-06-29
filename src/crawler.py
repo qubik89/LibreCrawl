@@ -208,6 +208,7 @@ class WebCrawler:
             'concurrency': 20,
             'persist_links': True,
             'link_placements': None,
+            'max_links_per_page': 0,
             'memory_limit': 512 * 1024 * 1024,
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -850,6 +851,12 @@ class WebCrawler:
             'CRAWL_LINK_PLACEMENTS',
             self.config.get('link_placements'),
         )
+        self.config['max_links_per_page'] = _env_int(
+            'CRAWL_MAX_LINKS_PER_PAGE',
+            self.config.get('max_links_per_page', 0),
+            0,
+            10000,
+        )
         self.batch_save_size = _env_int(
             'CRAWL_BATCH_SAVE_SIZE',
             self.batch_save_size,
@@ -1121,6 +1128,7 @@ class WebCrawler:
                         url,
                         self.url_statuses,
                         allowed_placements=self.config.get('link_placements'),
+                        max_links=self.config.get('max_links_per_page'),
                     )
                     links_after = len(self.link_manager.all_links)
 
@@ -1261,6 +1269,7 @@ class WebCrawler:
                     url,
                     self.url_statuses,
                     allowed_placements=self.config.get('link_placements'),
+                    max_links=self.config.get('max_links_per_page'),
                 )
                 links_after = len(self.link_manager.all_links)
 
