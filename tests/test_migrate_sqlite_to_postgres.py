@@ -91,6 +91,9 @@ class SqliteToPostgresMigrationTest(unittest.TestCase):
                 'INSERT INTO user_settings VALUES (1, "{""concurrency"":20}", "2026-01-02")'
             )
             sqlite_conn.execute(
+                'INSERT INTO user_settings VALUES (2, "{""orphan"":true}", "2026-01-02")'
+            )
+            sqlite_conn.execute(
                 'INSERT INTO crawls VALUES (6, 1, "s", "https://example.com", "example.com", "running", "{}", 10, 3, 1, "2026-01-01", NULL, "2026-01-02", 1.5, 2.5, 1, NULL)'
             )
             sqlite_conn.commit()
@@ -99,7 +102,7 @@ class SqliteToPostgresMigrationTest(unittest.TestCase):
             with mock.patch.object(migrator, 'pg_connect', return_value=pg):
                 counts = migrator.migrate(db_file.name, 'postgresql://example')
 
-        self.assertEqual(counts, {'users': 1, 'user_settings': 1, 'crawls': 1})
+        self.assertEqual(counts, {'users': 1, 'user_settings': 1, 'crawls': 1, 'skipped_user_settings': 1})
         sql = '\n'.join(statement for statement, _params in pg.sql)
         self.assertIn('INSERT INTO users', sql)
         self.assertIn('INSERT INTO user_settings', sql)

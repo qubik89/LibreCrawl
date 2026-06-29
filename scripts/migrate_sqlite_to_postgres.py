@@ -30,12 +30,14 @@ def _fetch_all(conn, table):
 
 
 def migrate(sqlite_path, database_url):
-    counts = {'users': 0, 'user_settings': 0, 'crawls': 0}
+    counts = {'users': 0, 'user_settings': 0, 'crawls': 0, 'skipped_user_settings': 0}
     pg = pg_connect(database_url)
     try:
         cursor = pg.cursor()
         with sqlite_rows(sqlite_path) as sqlite_conn:
+            user_ids = set()
             for row in _fetch_all(sqlite_conn, 'users'):
+                user_ids.add(row.get('id'))
                 cursor.execute('''
                     INSERT INTO users (
                         id, username, email, password_hash, verified, tier, created_at, last_login
@@ -55,6 +57,9 @@ def migrate(sqlite_path, database_url):
                 counts['users'] += 1
 
             for row in _fetch_all(sqlite_conn, 'user_settings'):
+                if row.get('user_id') not in user_ids:
+                    counts['skipped_user_settings'] += 1
+                    continue
                 cursor.execute('''
                     INSERT INTO user_settings (user_id, settings_json, updated_at)
                     VALUES (%s, %s, %s)
