@@ -184,6 +184,9 @@ class WebCrawler:
         self.auto_save_thread = None
         self.db_save_enabled = False  # Only enable when crawl_id is set
         self.html_process_pool = None
+        self.perf_lock = threading.Lock()
+        self.last_perf_log_time = time.time()
+        self.perf_stats = self._new_perf_stats()
 
         # Enable nested asyncio for thread compatibility
         nest_asyncio.apply()
@@ -193,6 +196,58 @@ class WebCrawler:
     def _log_verbose(self, message):
         if self.verbose_logs:
             print(message)
+
+    def _new_perf_stats(self):
+        return {
+            'urls': 0,
+            'errors': 0,
+            'links': 0,
+            'issues': 0,
+            'fetch_ms': 0.0,
+            'html_ms': 0.0,
+            'links_ms': 0.0,
+            'discover_ms': 0.0,
+            'issues_ms': 0.0,
+            'save_ms': 0.0,
+            'save_lock_wait_ms': 0.0,
+            'save_calls': 0,
+        }
+
+    def _perf_add(self, **values):
+        if self.config.get('perf_log_interval', 0) <= 0:
+            return
+        with self.perf_lock:
+            for key, value in values.items():
+                self.perf_stats[key] = self.perf_stats.get(key, 0) + value
+
+    def _maybe_log_perf(self):
+        interval = self.config.get('perf_log_interval', 0)
+        if interval <= 0:
+            return
+        now = time.time()
+        with self.perf_lock:
+            elapsed = now - self.last_perf_log_time
+            if elapsed < interval:
+                return
+            stats = self.perf_stats
+            self.perf_stats = self._new_perf_stats()
+            self.last_perf_log_time = now
+
+        urls = max(stats['urls'], 1)
+        print(
+            "CRAWL_PERF "
+            f"crawl_id={self.crawl_id} elapsed={elapsed:.1f}s urls={stats['urls']} "
+            f"rate={stats['urls'] / max(elapsed, 1):.2f}/s errors={stats['errors']} "
+            f"avg_fetch_ms={stats['fetch_ms'] / urls:.1f} "
+            f"avg_html_ms={stats['html_ms'] / urls:.1f} "
+            f"avg_links_ms={stats['links_ms'] / urls:.1f} "
+            f"avg_discover_ms={stats['discover_ms'] / urls:.1f} "
+            f"avg_issues_ms={stats['issues_ms'] / urls:.1f} "
+            f"save_calls={stats['save_calls']} save_ms={stats['save_ms']:.1f} "
+            f"save_lock_wait_ms={stats['save_lock_wait_ms']:.1f} "
+            f"links={stats['links']} issues={stats['issues']}",
+            flush=True,
+        )
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -218,6 +273,7 @@ class WebCrawler:
             'link_placements': None,
             'max_links_per_page': 0,
             'html_process_workers': 0,
+            'perf_log_interval': 0,
             'memory_limit': 512 * 1024 * 1024,
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -690,8 +746,17 @@ class WebCrawler:
         if not self.db_save_enabled or not self.crawl_id:
             return
 
+        wait_start = time.perf_counter()
         with self.db_save_lock:
+            save_start = time.perf_counter()
             self._save_batch_to_db_locked(force=force)
+            save_ms = (time.perf_counter() - save_start) * 1000
+        self._perf_add(
+            save_calls=1,
+            save_ms=save_ms,
+            save_lock_wait_ms=(save_start - wait_start) * 1000,
+        )
+        self._maybe_log_perf()
 
     def _save_batch_to_db_locked(self, force=False):
         from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
@@ -872,6 +937,12 @@ class WebCrawler:
             0,
             max(1, os.cpu_count() or 1),
         )
+        self.config['perf_log_interval'] = _env_int(
+            'CRAWL_PERF_LOG_INTERVAL',
+            self.config.get('perf_log_interval', 0),
+            0,
+            3600,
+        )
         self.batch_save_size = _env_int(
             'CRAWL_BATCH_SAVE_SIZE',
             self.batch_save_size,
@@ -960,8 +1031,14 @@ class WebCrawler:
 
                                         # Detect issues
                                         issues_before = len(self.issue_detector.detected_issues)
+                                        issues_start = time.perf_counter()
                                         self.issue_detector.detect_issues(result)
+                                        issues_ms = (time.perf_counter() - issues_start) * 1000
                                         issues_after = len(self.issue_detector.detected_issues)
+                                        self._perf_add(
+                                            issues=issues_after - issues_before,
+                                            issues_ms=issues_ms,
+                                        )
 
                                         # Track + batch new issues
                                         if issues_after > issues_before:
@@ -975,6 +1052,7 @@ class WebCrawler:
                         # Remove completed futures
                         for future in completed_futures:
                             del active_futures[future]
+                        self._maybe_log_perf()
 
                         # Demo mode: check per-user memory limit
                         if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
@@ -1072,6 +1150,7 @@ class WebCrawler:
         self._log_verbose(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
         start_time = time.time()
+        perf = {'urls': 1}
 
         try:
             # Check file size if configured
@@ -1084,6 +1163,7 @@ class WebCrawler:
                     )
                     content_length = head_response.headers.get('content-length')
                     if content_length and int(content_length) > self.config['max_file_size']:
+                        self._perf_add(**perf)
                         return self.seo_extractor.create_empty_result(
                             url, depth, 0,
                             f'File too large: {content_length} bytes',
@@ -1094,6 +1174,7 @@ class WebCrawler:
 
             # Fetch the page with retries
             response = None
+            fetch_start = time.perf_counter()
             for attempt in range(retries + 1):
                 try:
                     response = self.session.get(
@@ -1106,6 +1187,7 @@ class WebCrawler:
                     if attempt >= retries:
                         raise e
                     time.sleep(1)
+            perf['fetch_ms'] = (time.perf_counter() - fetch_start) * 1000
 
             # Determine if URL is internal
             is_internal = self.link_manager.is_internal(url)
@@ -1159,15 +1241,19 @@ class WebCrawler:
 
             # Only parse HTML content
             if 'text/html' in response.headers.get('content-type', ''):
+                html_start = time.perf_counter()
                 analysis = self._analyze_html_content(response, url, depth, is_internal)
+                perf['html_ms'] = (time.perf_counter() - html_start) * 1000
                 result = analysis['result']
 
                 if self.config.get('persist_links', True):
+                    links_start = time.perf_counter()
                     new_links = self.link_manager.apply_collected_links(
                         analysis.get('links', []),
                         self.url_statuses,
                         max_links=self.config.get('max_links_per_page'),
                     )
+                    perf['links'] = len(new_links)
 
                     if new_links:
                         image_links = [l for l in new_links if l.get('placement') == 'image']
@@ -1185,6 +1271,7 @@ class WebCrawler:
                         self.user_memory.track_links(new_links)
                         if self.db_save_enabled:
                             self.unsaved_links.extend(new_links)
+                    perf['links_ms'] = (time.perf_counter() - links_start) * 1000
 
                 should_extract = (
                     (is_internal and depth < self.config['max_depth']) or
@@ -1192,11 +1279,13 @@ class WebCrawler:
                 )
 
                 if should_extract:
+                    discover_start = time.perf_counter()
                     self.link_manager.apply_discovered_urls(
                         analysis.get('discovered_urls', []),
                         url,
                         self._should_crawl_url,
                     )
+                    perf['discover_ms'] = (time.perf_counter() - discover_start) * 1000
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
@@ -1205,13 +1294,17 @@ class WebCrawler:
             # Add to unsaved batch if DB persistence enabled
             if self.db_save_enabled:
                 self.unsaved_urls.append(result)
+                self._perf_add(**perf)
                 # Trigger batch save if threshold reached
                 if len(self.unsaved_urls) >= self.batch_save_size:
                     self._save_batch_to_db()
+            else:
+                self._perf_add(**perf)
 
             return result
 
         except Exception as e:
+            self._perf_add(errors=1)
             return self.seo_extractor.create_empty_result(
                 url, depth, 0, str(e),
                 error_type=classify_fetch_error(e)

@@ -157,6 +157,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 'CRAWL_MAX_LINKS_PER_PAGE',
                 'CRAWL_ENABLE_DUPLICATION_CHECK',
                 'CRAWL_HTML_PROCESS_WORKERS',
+                'CRAWL_PERF_LOG_INTERVAL',
             )
         }
         crawl_data = {
@@ -187,6 +188,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             os.environ['CRAWL_MAX_LINKS_PER_PAGE'] = '75'
             os.environ['CRAWL_ENABLE_DUPLICATION_CHECK'] = 'false'
             os.environ['CRAWL_HTML_PROCESS_WORKERS'] = '12'
+            os.environ['CRAWL_PERF_LOG_INTERVAL'] = '60'
 
             crawler = WebCrawler()
             with (
@@ -209,6 +211,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             self.assertEqual(crawler.config['max_links_per_page'], 75)
             self.assertFalse(crawler.config['enable_duplication_check'])
             self.assertEqual(crawler.config['html_process_workers'], 12)
+            self.assertEqual(crawler.config['perf_log_interval'], 60)
             load_links.assert_not_called()
         finally:
             for key, value in old_env.items():
@@ -216,6 +219,27 @@ class CrawlerCheckpointTests(unittest.TestCase):
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
+
+    def test_perf_log_aggregates_and_resets(self):
+        crawler = WebCrawler()
+        crawler.crawl_id = 13
+        crawler.config['perf_log_interval'] = 60
+        crawler.last_perf_log_time = 1000
+
+        crawler._perf_add(urls=2, fetch_ms=100, html_ms=40, links=7)
+
+        with (
+            mock.patch('src.crawler.time.time', return_value=1061),
+            mock.patch('builtins.print') as print_mock,
+        ):
+            crawler._maybe_log_perf()
+
+        self.assertEqual(print_mock.call_count, 1)
+        line = print_mock.call_args.args[0]
+        self.assertIn('CRAWL_PERF crawl_id=13', line)
+        self.assertIn('urls=2', line)
+        self.assertIn('avg_fetch_ms=50.0', line)
+        self.assertEqual(crawler.perf_stats['urls'], 0)
 
 
 if __name__ == '__main__':
