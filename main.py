@@ -2066,7 +2066,6 @@ def export_data():
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
             exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
             issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-            print(f"DEBUG: After exclusion filter, {len(issues)} issues remain")
 
         # Collect files to export based on special field selections
         files_to_export = []
@@ -2077,15 +2076,6 @@ def export_data():
 
         # Remove special fields from regular export fields
         regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
-
-        # Debug logging
-        print(f"DEBUG: export_fields = {export_fields}")
-        print(f"DEBUG: has_issues_export = {has_issues_export}")
-        print(f"DEBUG: has_links_export = {has_links_export}")
-        print(f"DEBUG: regular_fields = {regular_fields}")
-        print(f"DEBUG: len(urls) = {len(urls)}")
-        print(f"DEBUG: len(links) = {len(links)}")
-        print(f"DEBUG: len(issues) = {len(issues)}")
 
         # Generate issues export if requested
         if has_issues_export:

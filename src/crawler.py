@@ -136,6 +136,7 @@ class WebCrawler:
         self.crawl_results = []
         self.url_statuses = {}
         self.results_lock = threading.Lock()
+        self.verbose_logs = os.environ.get('CRAWL_VERBOSE_LOGS', '').lower() in ('1', 'true', 'yes', 'on')
 
         # State flags
         self.is_running = False
@@ -185,6 +186,10 @@ class WebCrawler:
         nest_asyncio.apply()
         self._apply_runtime_overrides()
         self._configure_http_adapter()
+
+    def _log_verbose(self, message):
+        if self.verbose_logs:
+            print(message)
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -326,7 +331,7 @@ class WebCrawler:
                 )
                 if self.crawl_id:
                     self.db_save_enabled = True
-                    print(f"Database persistence enabled for crawl {self.crawl_id}")
+                    self._log_verbose(f"Database persistence enabled for crawl {self.crawl_id}")
 
             # Initialize components
             self._initialize_components()
@@ -340,9 +345,9 @@ class WebCrawler:
 
             # Discover sitemaps if enabled
             if self.config.get('discover_sitemaps', True):
-                print(f"Starting sitemap discovery for {url}")
+                self._log_verbose(f"Starting sitemap discovery for {url}")
                 self._discover_and_add_sitemap_urls(url)
-                print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
+                self._log_verbose(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
 
             # Start crawling in separate thread
             self.is_running = True
@@ -414,7 +419,7 @@ class WebCrawler:
                 filtered_count += 1
 
         self.stats['discovered'] = self.link_manager.get_stats()['discovered']
-        print(f"Sitemap processing: {added_count} added, {filtered_count} filtered")
+        self._log_verbose(f"Sitemap processing: {added_count} added, {filtered_count} filtered")
 
     def stop_crawl(self):
         """Stop the current crawl"""
@@ -518,7 +523,7 @@ class WebCrawler:
             # Load already crawled URLs from database
             from src.crawl_db import load_crawl_links, load_crawl_issues
 
-            print(f"Loading crawled data from database...")
+            self._log_verbose(f"Loading crawled data from database...")
             self.crawl_results = load_crawled_urls(crawl_id)
             self.url_statuses = {
                 row.get('url'): row.get('status_code')
@@ -547,7 +552,7 @@ class WebCrawler:
             if loaded_issues:
                 self.issue_detector.detected_issues = loaded_issues
 
-            print(f"Loaded {len(self.crawl_results)} URLs, {len(loaded_links)} links, {len(loaded_issues)} issues from database")
+            self._log_verbose(f"Loaded {len(self.crawl_results)} URLs, {len(loaded_links)} links, {len(loaded_issues)} issues from database")
 
             # Account for loaded data in per-user memory tracker
             self.user_memory.reset()
@@ -558,7 +563,7 @@ class WebCrawler:
                 self.user_memory.track_links(loaded_links)
             if loaded_issues:
                 self.user_memory.track_issues(loaded_issues)
-            print(f"User memory tracker: {self.user_memory.total_mb:.0f}MB from loaded data")
+            self._log_verbose(f"User memory tracker: {self.user_memory.total_mb:.0f}MB from loaded data")
 
             # Restore statistics
             self.stats['crawled'] = max(len(self.crawl_results), crawl_data.get('urls_crawled') or 0)
@@ -585,12 +590,12 @@ class WebCrawler:
                 if 'visited_urls' in checkpoint:
                     self.link_manager.visited_urls = set(checkpoint['visited_urls'])
 
-                print(f"Restored queue: {len(self.link_manager.discovered_urls)} pending, "
-                      f"{len(self.link_manager.visited_urls)} visited")
+                self._log_verbose(f"Restored queue: {len(self.link_manager.discovered_urls)} pending, "
+                                  f"{len(self.link_manager.visited_urls)} visited")
 
             # If queue is empty (no checkpoint or crawl crashed early), rebuild queue from links
             if not self.link_manager.discovered_urls:
-                print("Queue is empty - rebuilding from discovered links")
+                self._log_verbose("Queue is empty - rebuilding from discovered links")
 
                 # Get all URLs from loaded links that haven't been crawled yet
                 crawled_urls = set(url_data.get('url') for url_data in self.crawl_results)
@@ -603,11 +608,11 @@ class WebCrawler:
                         self.link_manager.add_url(target_url, link.get('depth', 1))
                         added_count += 1
 
-                print(f"Added {added_count} pending URLs to queue from links")
+                self._log_verbose(f"Added {added_count} pending URLs to queue from links")
 
                 # If still empty, crawl is complete
                 if not self.link_manager.discovered_urls:
-                    print("No pending URLs found - crawl was already complete")
+                    self._log_verbose("No pending URLs found - crawl was already complete")
 
                 self.stats['discovered'] = len(self.link_manager.all_discovered_urls)
 
@@ -657,7 +662,7 @@ class WebCrawler:
         # Per-user data sizes from incremental tracker (O(1), no recursion)
         data_sizes = self.user_memory.get_stats()
 
-        print(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
+        self._log_verbose(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
 
         return {
             'status': status,
@@ -748,12 +753,12 @@ class WebCrawler:
 
             self.last_save_time = now
             if has_rows:
-                print(
+                self._log_verbose(
                     f"Saved batch for crawl {self.crawl_id} "
                     f"(sqlite_rows={sqlite_rows_saved}, clickhouse_rows={clickhouse_rows_saved}, stats={stats_saved})"
                 )
             elif stats_saved:
-                print(f"Saved crawl stats to database for crawl {self.crawl_id}")
+                self._log_verbose(f"Saved crawl stats to database for crawl {self.crawl_id}")
 
         except Exception as e:
             print(f"Error saving batch to database: {e}")
@@ -783,7 +788,7 @@ class WebCrawler:
 
             save_checkpoint(self.crawl_id, checkpoint)
             self.last_queue_checkpoint_time = time.time()
-            print(f"Saved queue checkpoint for crawl {self.crawl_id}")
+            self._log_verbose(f"Saved queue checkpoint for crawl {self.crawl_id}")
 
         except Exception as e:
             print(f"Error saving checkpoint: {e}")
@@ -799,7 +804,7 @@ class WebCrawler:
 
         self.auto_save_thread = threading.Thread(target=auto_save_worker, daemon=True)
         self.auto_save_thread.start()
-        print("Auto-save thread started")
+        self._log_verbose("Auto-save thread started")
 
     def update_config(self, new_config):
         """Update crawler configuration"""
@@ -874,7 +879,7 @@ class WebCrawler:
         """Main crawling worker with smooth rate limiting"""
         # Use async approach if JavaScript rendering is enabled
         if self.config.get('enable_javascript', False):
-            print("Initializing JavaScript rendering...")
+            self._log_verbose("Initializing JavaScript rendering...")
             asyncio.run(self._crawl_async_with_js())
             return
 
@@ -906,7 +911,7 @@ class WebCrawler:
                             continue
 
                         # Submit crawl task immediately - rate limiting happens inside the worker
-                        print(f"Submitting task for: {current_url}")
+                        self._log_verbose(f"Submitting task for: {current_url}")
                         future = executor.submit(self._crawl_url, current_url, depth)
                         active_futures[future] = current_url
 
@@ -923,7 +928,7 @@ class WebCrawler:
                                         self.url_statuses[result['url']] = result.get('status_code')
                                         self.stats['crawled'] += 1
                                         self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-                                        print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
+                                        self._log_verbose(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                     # Track per-user memory
                                     self.user_memory.track_url(result)
@@ -948,19 +953,19 @@ class WebCrawler:
 
                     # Demo mode: check per-user memory limit
                     if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
-                        print(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
+                        self._log_verbose(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
                         self._demo_limit_reached = True
                         break
 
                     # Check for completion
                     if self.stats['crawled'] >= self.config['max_urls']:
-                        print(f"Reached maximum URLs limit ({self.config['max_urls']})")
+                        self._log_verbose(f"Reached maximum URLs limit ({self.config['max_urls']})")
                         break
 
                     # Check if no more work
                     link_stats = self.link_manager.get_stats()
                     if link_stats['pending'] == 0 and len(active_futures) == 0:
-                        print("No more URLs to crawl")
+                        self._log_verbose("No more URLs to crawl")
                         break
 
                     # Tiny sleep only to yield CPU
@@ -974,7 +979,7 @@ class WebCrawler:
         if not self._demo_limit_reached:
             # Run PageSpeed analysis if enabled
             if self.config.get('enable_pagespeed', False):
-                print("Running PageSpeed analysis...")
+                self._log_verbose("Running PageSpeed analysis...")
                 self.is_running_pagespeed = True
                 self._run_pagespeed_analysis()
                 self.is_running_pagespeed = False
@@ -984,10 +989,10 @@ class WebCrawler:
 
             # Run duplication detection on all crawled content
             if self.issue_detector and self.config.get('enable_duplication_check', True):
-                print("Running duplication detection...")
+                self._log_verbose("Running duplication detection...")
                 duplication_threshold = self.config.get('duplication_threshold', 0.85)
                 self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
-                print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
+                self._log_verbose(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
         # Save final data and set appropriate status
         if self.db_save_enabled and self.crawl_id:
@@ -1002,9 +1007,9 @@ class WebCrawler:
         self.is_running = False
         self._notify_finished()
         if self._demo_limit_reached:
-            print(f"Crawl stopped (demo limit). User memory: {self.user_memory.total_mb:.0f}MB. Crawled: {self.stats['crawled']}")
+            self._log_verbose(f"Crawl stopped (demo limit). User memory: {self.user_memory.total_mb:.0f}MB. Crawled: {self.stats['crawled']}")
         else:
-            print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
+            self._log_verbose(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
 
     def _crawl_url(self, url, depth):
         """Crawl a single URL"""
@@ -1016,7 +1021,7 @@ class WebCrawler:
 
     def _crawl_url_with_requests(self, url, depth):
         """Crawl a single URL using traditional HTTP requests"""
-        print(f"Starting crawl of {url}")
+        self._log_verbose(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
         start_time = time.time()
 
@@ -1359,7 +1364,7 @@ class WebCrawler:
                                     self.url_statuses[result['url']] = result.get('status_code')
                                     self.stats['crawled'] += 1
                                     self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-                                    print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
+                                    self._log_verbose(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                 # Track per-user memory
                                 self.user_memory.track_url(result)
@@ -1380,14 +1385,14 @@ class WebCrawler:
 
                 # Demo mode: check per-user memory limit
                 if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
-                    print(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
+                    self._log_verbose(f"DEMO MODE: Per-user memory limit reached ({self.user_memory.total_mb:.0f}MB)")
                     self._demo_limit_reached = True
                     break
 
                 # Check completion
                 link_stats = self.link_manager.get_stats()
                 if link_stats['pending'] == 0 and len(active_tasks) == 0:
-                    print("No more URLs to crawl")
+                    self._log_verbose("No more URLs to crawl")
                     break
 
                 await asyncio.sleep(0.001)
@@ -1407,10 +1412,10 @@ class WebCrawler:
 
                 # Run duplication detection on all crawled content
                 if self.issue_detector and self.config.get('enable_duplication_check', True):
-                    print("Running duplication detection...")
+                    self._log_verbose("Running duplication detection...")
                     duplication_threshold = self.config.get('duplication_threshold', 0.85)
                     self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
-                    print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
+                    self._log_verbose(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
             # Save final data and set appropriate status
             if self.db_save_enabled and self.crawl_id:
@@ -1425,11 +1430,11 @@ class WebCrawler:
             await self.js_renderer.cleanup()
             self.is_running = False
             self._notify_finished()
-            print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
+            self._log_verbose(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
 
     def _update_all_linked_from(self):
         """Update linked_from field for all crawled URLs based on collected source_pages data"""
-        print("Updating linked_from data for all URLs...")
+        self._log_verbose("Updating linked_from data for all URLs...")
         updated_count = 0
 
         for result in self.crawl_results:
@@ -1439,7 +1444,7 @@ class WebCrawler:
                 result['linked_from'] = sources
                 updated_count += 1
 
-        print(f"Updated linked_from data for {updated_count} URLs")
+        self._log_verbose(f"Updated linked_from data for {updated_count} URLs")
 
     def _check_image_statuses(self, image_links):
         """HEAD-check image URLs to detect broken images.
@@ -1553,18 +1558,18 @@ class WebCrawler:
             selected_pages = self._select_pages_for_pagespeed()
 
             if not selected_pages:
-                print("No suitable pages found for PageSpeed analysis")
+                self._log_verbose("No suitable pages found for PageSpeed analysis")
                 return
 
-            print(f"Running PageSpeed analysis on {len(selected_pages)} pages...")
+            self._log_verbose(f"Running PageSpeed analysis on {len(selected_pages)} pages...")
 
             pagespeed_results = []
             for i, page_url in enumerate(selected_pages):
                 if not self.is_running:
-                    print("PageSpeed analysis cancelled")
+                    self._log_verbose("PageSpeed analysis cancelled")
                     return
 
-                print(f"Analyzing page {i+1}/{len(selected_pages)}: {page_url}")
+                self._log_verbose(f"Analyzing page {i+1}/{len(selected_pages)}: {page_url}")
 
                 # Mobile analysis
                 mobile_result = self._call_pagespeed_api(page_url, 'mobile')
@@ -1587,7 +1592,7 @@ class WebCrawler:
                     time.sleep(3)
 
             self.stats['pagespeed_results'] = pagespeed_results
-            print(f"PageSpeed analysis completed for {len(pagespeed_results)} pages")
+            self._log_verbose(f"PageSpeed analysis completed for {len(pagespeed_results)} pages")
 
         except Exception as e:
             print(f"Error running PageSpeed analysis: {e}")
@@ -1697,7 +1702,7 @@ class WebCrawler:
                     elif response.status_code == 429:
                         if attempt < retries:
                             delay = (2 ** attempt) * random.uniform(0.5, 1.5)
-                            print(f"Rate limited, retrying in {delay:.1f} seconds...")
+                            self._log_verbose(f"Rate limited, retrying in {delay:.1f} seconds...")
                             time.sleep(delay)
                             continue
 

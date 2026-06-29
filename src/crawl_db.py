@@ -14,6 +14,9 @@ import os
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 QUEUE_DIR = os.path.join(os.path.dirname(DB_FILE), 'crawl_queues')
 
+def verbose_logs_enabled():
+    return os.environ.get('CRAWL_VERBOSE_LOGS', '').lower() in ('1', 'true', 'yes', 'on')
+
 def metadata_postgres_enabled():
     from src import crawl_metadata_pg
     return crawl_metadata_pg.enabled()
@@ -197,7 +200,8 @@ def init_crawl_tables():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_category ON crawl_issues(crawl_id, category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_queue_crawl ON crawl_queue(crawl_id)')
 
-        print("Crawl persistence tables initialized successfully")
+        if verbose_logs_enabled():
+            print("Crawl persistence tables initialized successfully")
 
 def create_crawl(user_id, session_id, base_url, base_domain, config_snapshot):
     """
@@ -221,7 +225,8 @@ def create_crawl(user_id, session_id, base_url, base_domain, config_snapshot):
             ''', (user_id, session_id, base_url, base_domain, json.dumps(config_snapshot)))
 
             crawl_id = cursor.lastrowid
-            print(f"Created new crawl record: ID={crawl_id}, URL={base_url}")
+            if verbose_logs_enabled():
+                print(f"Created new crawl record: ID={crawl_id}, URL={base_url}")
             return crawl_id
     except Exception as e:
         print(f"Error creating crawl: {e}")
@@ -335,7 +340,8 @@ def save_url_batch(crawl_id, urls):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
-            print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
+            if verbose_logs_enabled():
+                print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
             return True
 
     except Exception as e:
@@ -374,7 +380,8 @@ def save_links_batch(crawl_id, links):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
-            print(f"Saved {len(links)} links to database for crawl {crawl_id}")
+            if verbose_logs_enabled():
+                print(f"Saved {len(links)} links to database for crawl {crawl_id}")
             return True
 
     except Exception as e:
@@ -408,7 +415,8 @@ def save_issues_batch(crawl_id, issues):
                 ) VALUES (?, ?, ?, ?, ?, ?)
             ''', rows)
 
-            print(f"Saved {len(issues)} issues to database for crawl {crawl_id}")
+            if verbose_logs_enabled():
+                print(f"Saved {len(issues)} issues to database for crawl {crawl_id}")
             return True
 
     except Exception as e:
@@ -511,7 +519,8 @@ def set_crawl_status(crawl_id, status):
                     WHERE id = ?
                 ''', (status, crawl_id))
 
-            print(f"Updated crawl {crawl_id} status to: {status}")
+            if verbose_logs_enabled():
+                print(f"Updated crawl {crawl_id} status to: {status}")
             return True
 
     except Exception as e:
@@ -722,7 +731,8 @@ def delete_crawl(crawl_id):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM crawls WHERE id = ?', (crawl_id,))
-            print(f"Deleted crawl {crawl_id} and all associated data")
+            if verbose_logs_enabled():
+                print(f"Deleted crawl {crawl_id} and all associated data")
             return True
     except Exception as e:
         print(f"Error deleting crawl: {e}")
@@ -778,7 +788,8 @@ def cleanup_old_crawls(days=90):
             ''', (days,))
 
             deleted = cursor.rowcount
-            print(f"Cleaned up {deleted} old crawls")
+            if verbose_logs_enabled():
+                print(f"Cleaned up {deleted} old crawls")
             return deleted
 
     except Exception as e:
