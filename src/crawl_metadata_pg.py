@@ -164,6 +164,7 @@ def get_user_crawls(user_id, limit=50, offset=0, status_filter=None):
         for row in cursor.fetchall():
             crawl = dict(row)
             crawl['config_snapshot'] = None
+            crawl['resume_checkpoint'] = None
             crawls.append(crawl)
         return crawls
 

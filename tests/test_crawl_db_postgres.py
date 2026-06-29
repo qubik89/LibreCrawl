@@ -153,6 +153,8 @@ class CrawlDbPostgresTest(unittest.TestCase):
 
             crawls = crawl_db.get_user_crawls(1)
             self.assertEqual(crawls[0]['id'], crawl_id)
+            self.assertIsNone(crawls[0]['config_snapshot'])
+            self.assertIsNone(crawls[0]['resume_checkpoint'])
             self.assertEqual(crawl_db.get_crawl_count(1), 1)
             self.assertEqual(crawl_db.get_crawl_status_counts(1), {'paused': 1})
 

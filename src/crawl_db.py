@@ -619,6 +619,7 @@ def get_user_crawls(user_id, limit=50, offset=0, status_filter=None):
                 crawl = dict(row)
                 # Don't parse full config for list view
                 crawl['config_snapshot'] = None  # Save bandwidth
+                crawl['resume_checkpoint'] = None
                 crawls.append(crawl)
 
             return crawls
