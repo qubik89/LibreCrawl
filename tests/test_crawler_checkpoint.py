@@ -115,6 +115,37 @@ class CrawlerCheckpointTests(unittest.TestCase):
             else:
                 os.environ['CRAWL_RESULT_STORAGE'] = old_storage
 
+    def test_resume_preserves_persisted_crawled_count_when_rows_are_external(self):
+        crawler = WebCrawler()
+        crawl_data = {
+            'id': 11,
+            'user_id': 1,
+            'status': 'paused',
+            'base_url': 'https://example.com',
+            'base_domain': 'example.com',
+            'config_snapshot': crawler._get_default_config(),
+            'urls_crawled': 1234,
+            'urls_discovered': 5000,
+            'max_depth_reached': 3,
+            'resume_checkpoint': {},
+        }
+
+        with (
+            mock.patch('src.crawl_db.get_resume_data', return_value=crawl_data),
+            mock.patch('src.crawl_db.load_crawled_urls', return_value=[]),
+            mock.patch('src.crawl_db.load_crawl_links', return_value=[]),
+            mock.patch('src.crawl_db.load_crawl_issues', return_value=[]),
+            mock.patch('src.crawl_db.load_crawl_queue', return_value=[('https://example.com/next', 1)]),
+            mock.patch('src.crawl_db.set_crawl_status', return_value=True),
+            mock.patch.object(WebCrawler, '_start_auto_save_thread'),
+            mock.patch('src.crawler.threading.Thread', side_effect=lambda target: SimpleNamespace(start=lambda: None)),
+        ):
+            success, message = crawler.resume_from_database(11, user_id=1, session_id='s')
+
+        self.assertTrue(success)
+        self.assertEqual(crawler.stats['crawled'], 1234)
+        self.assertEqual(message, 'Resumed crawl from 1234 URLs')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -525,7 +525,7 @@ class WebCrawler:
             print(f"User memory tracker: {self.user_memory.total_mb:.0f}MB from loaded data")
 
             # Restore statistics
-            self.stats['crawled'] = len(self.crawl_results)
+            self.stats['crawled'] = max(len(self.crawl_results), crawl_data.get('urls_crawled') or 0)
             self.stats['discovered'] = crawl_data.get('urls_discovered', 0)
             self.stats['depth'] = crawl_data.get('max_depth_reached', 0)
             self.stats['start_time'] = time.time()  # New start time for resume
