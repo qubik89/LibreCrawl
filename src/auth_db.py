@@ -280,6 +280,27 @@ def get_user_by_id(user_id):
         print(f"Error fetching user: {e}")
         return None
 
+
+def get_user_by_username(username):
+    """Get user information by username."""
+    try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_user_by_username(username)
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, username, email, verified, tier
+                FROM users
+                WHERE username = ?
+            ''', (username,))
+            user = cursor.fetchone()
+            return dict(user) if user else None
+    except Exception as e:
+        print(f"Error fetching user by username: {e}")
+        return None
+
 def get_all_users():
     """Get all users (for admin purposes)"""
     try:
@@ -419,6 +440,8 @@ def log_crawl_start(user_id, base_url):
     # Don't log crawls for guests (user_id = None)
     if user_id is None:
         return None
+    if metadata_postgres_enabled():
+        return None
 
     try:
         with get_db() as conn:
@@ -487,6 +510,10 @@ def get_crawls_last_24h(user_id):
         return 0  # Call get_guest_crawls_last_24h with IP instead
 
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_crawls_last_24h(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''

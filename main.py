@@ -65,16 +65,9 @@ def generate_random_password(length=16):
 
 def auto_login_local_mode():
     """Auto-login for local mode - creates or logs into 'local' admin account"""
-    import sqlite3
     try:
-        conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        # Check if 'local' user exists
-        cursor.execute('SELECT id, username, tier FROM users WHERE username = ?', ('local',))
-        user = cursor.fetchone()
-
+        from src.auth_db import create_user, get_user_by_username, set_user_tier, verify_user
+        user = get_user_by_username('local')
         if user:
             # User exists, just log them in
             session['user_id'] = user['id']
@@ -85,16 +78,11 @@ def auto_login_local_mode():
         else:
             # Create new local user with random password
             random_password = generate_random_password()
-            from src.auth_db import hash_password
-            password_hash = hash_password(random_password)
-
-            cursor.execute('''
-                INSERT INTO users (username, email, password_hash, verified, tier)
-                VALUES (?, ?, ?, 1, 'admin')
-            ''', ('local', 'local@localhost', password_hash))
-            conn.commit()
-
-            user_id = cursor.lastrowid
+            success, _message, user_id = create_user('local', 'local@localhost', random_password)
+            if not success:
+                return False
+            verify_user(user_id)
+            set_user_tier(user_id, 'admin')
 
             # Log in the new user
             session['user_id'] = user_id
@@ -105,7 +93,6 @@ def auto_login_local_mode():
             print(f"Created and auto-logged in as new 'local' admin user (ID: {user_id})")
             print(f"Generated password: {random_password}")
 
-        conn.close()
         return True
     except Exception as e:
         print(f"Error in auto_login_local_mode: {e}")
@@ -120,29 +107,18 @@ def skip_auth_login(username):
 
     Returns (success, message).
     """
-    import sqlite3
     try:
-        conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute('SELECT id, username FROM users WHERE username = ?', (username,))
-        user = cursor.fetchone()
-
+        from src.auth_db import create_user, get_user_by_username, set_user_tier, verify_user
+        user = get_user_by_username(username)
         if user:
             user_id = user['id']
         else:
-            from src.auth_db import hash_password
             random_password = generate_random_password()
-            password_hash = hash_password(random_password)
-            cursor.execute('''
-                INSERT INTO users (username, email, password_hash, verified, tier)
-                VALUES (?, ?, ?, 1, 'admin')
-            ''', (username, f'{username}@skipauth.local', password_hash))
-            conn.commit()
-            user_id = cursor.lastrowid
-
-        conn.close()
+            success, message, user_id = create_user(username, f'{username}@skipauth.local', random_password)
+            if not success:
+                return False, message
+            verify_user(user_id)
+            set_user_tier(user_id, 'admin')
 
         session['user_id'] = user_id
         session['username'] = username
@@ -150,10 +126,6 @@ def skip_auth_login(username):
         session.permanent = True
 
         return True, 'Logged in (authentication skipped)'
-    except sqlite3.IntegrityError as e:
-        # Most likely the generated email collides with an existing account
-        # whose email happens to match. Fall back to a clearer message.
-        return False, f'Username conflict: try a different username ({e})'
     except Exception as e:
         print(f"Error in skip_auth_login: {e}")
         return False, f'Login error: {str(e)}'
@@ -905,18 +877,9 @@ def register():
     if success and LOCAL_MODE:
         try:
             from src.auth_db import verify_user, set_user_tier
-            # Get the user that was just created
-            import sqlite3
-            conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
-            user = cursor.fetchone()
-            conn.close()
-
-            if user:
-                verify_user(user['id'])
-                set_user_tier(user['id'], 'admin')
+            if user_id:
+                verify_user(user_id)
+                set_user_tier(user_id, 'admin')
                 message = 'Account created and verified! You have admin access in local mode.'
         except Exception as e:
             print(f"Error during local mode auto-verification: {e}")
@@ -1952,22 +1915,8 @@ def crawl_stats():
     """Get statistics about user's crawls"""
     try:
         user_id = session.get('user_id')
-        from src.crawl_db import get_crawl_count, get_database_size_mb
-        import sqlite3
-
-        # Get counts by status
-        conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT status, COUNT(*) as count
-            FROM crawls
-            WHERE user_id = ?
-            GROUP BY status
-        ''', (user_id,))
-
-        status_counts = {row[0]: row[1] for row in cursor.fetchall()}
-        conn.close()
+        from src.crawl_db import get_crawl_count, get_crawl_status_counts, get_database_size_mb
+        status_counts = get_crawl_status_counts(user_id)
 
         return jsonify({
             'success': True,

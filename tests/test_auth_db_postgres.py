@@ -51,6 +51,10 @@ class FakeCursor:
             self.row = next((u for u in self.conn.users.values() if u['username'] == params[0]), None)
             return self
 
+        if sql_clean.startswith('select count(*) as count from crawls'):
+            self.row = {'count': 2}
+            return self
+
         if 'from users' in sql_clean and 'where id' in sql_clean and sql_clean.startswith('select'):
             self.row = self.conn.users.get(params[0])
             return self
@@ -153,6 +157,7 @@ class AuthDbPostgresTest(unittest.TestCase):
             self.assertTrue(success)
             self.assertEqual(message, 'Login successful')
             self.assertEqual(user['tier'], 'guest')
+            self.assertEqual(auth_db.get_user_by_username('romeo')['id'], user_id)
 
             self.assertEqual(auth_db.set_user_tier(user_id, 'admin'), (True, 'User tier updated to admin'))
             self.assertEqual(auth_db.get_user_tier(user_id), 'admin')
@@ -161,6 +166,7 @@ class AuthDbPostgresTest(unittest.TestCase):
             self.assertEqual(auth_db.get_user_settings(user_id), {'concurrency': 20})
             self.assertTrue(auth_db.delete_user_settings(user_id))
             self.assertIsNone(auth_db.get_user_settings(user_id))
+            self.assertEqual(auth_db.get_crawls_last_24h(user_id), 2)
 
         create_sql = ' '.join(self.conn.sql[0][0].split()).lower()
         self.assertIn('create table if not exists users', create_sql)

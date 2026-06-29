@@ -121,6 +121,14 @@ def get_user_by_id(user_id):
         return dict(row) if row else None
 
 
+def get_user_by_username(username):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username, email, verified, tier FROM users WHERE username = %s', (username,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
 def get_all_users():
     with get_db() as conn:
         cursor = conn.cursor()
@@ -180,6 +188,19 @@ def get_user_by_email(email):
         cursor.execute('SELECT id, username, email, verified, tier FROM users WHERE email = %s', (email,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+
+def get_crawls_last_24h(user_id):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) as count
+            FROM crawls
+            WHERE user_id = %s
+            AND started_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ''', (user_id,))
+        row = cursor.fetchone()
+        return row['count'] if row else 0
 
 
 def create_verification_token(user_id, token, app_source='main'):

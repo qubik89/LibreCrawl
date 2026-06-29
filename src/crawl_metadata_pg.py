@@ -202,3 +202,15 @@ def get_crawl_count(user_id):
         cursor.execute('SELECT COUNT(*) as count FROM crawls WHERE user_id = %s', (user_id,))
         result = cursor.fetchone()
         return result['count'] if result else 0
+
+
+def get_crawl_status_counts(user_id):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT status, COUNT(*) as count
+            FROM crawls
+            WHERE user_id = %s
+            GROUP BY status
+        ''', (user_id,))
+        return {row['status']: row['count'] for row in cursor.fetchall()}

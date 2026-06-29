@@ -805,6 +805,31 @@ def get_crawl_count(user_id):
         print(f"Error getting crawl count: {e}")
         return 0
 
+
+def get_crawl_status_counts(user_id):
+    """Get crawl counts grouped by status for a user."""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.get_crawl_status_counts(user_id)
+        except Exception as e:
+            print(f"Error getting crawl status counts: {e}")
+            return {}
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT status, COUNT(*) as count
+                FROM crawls
+                WHERE user_id = ?
+                GROUP BY status
+            ''', (user_id,))
+            return {row['status']: row['count'] for row in cursor.fetchall()}
+    except Exception as e:
+        print(f"Error getting crawl status counts: {e}")
+        return {}
+
 def get_database_size_mb():
     """Get total database size in MB"""
     if metadata_postgres_enabled():

@@ -66,6 +66,14 @@ class FakeCursor:
             self.row = {'count': sum(1 for row in self.conn.crawls.values() if row['user_id'] == params[0])}
             return self
 
+        if sql_clean.startswith('select status, count(*) as count from crawls'):
+            counts = {}
+            for row in self.conn.crawls.values():
+                if row['user_id'] == params[0]:
+                    counts[row['status']] = counts.get(row['status'], 0) + 1
+            self.rows = [{'status': status, 'count': count} for status, count in counts.items()]
+            return self
+
         if 'from crawls' in sql_clean and 'where user_id' in sql_clean:
             rows = [row for row in self.conn.crawls.values() if row['user_id'] == params[0]]
             self.rows = sorted(rows, key=lambda row: row['id'], reverse=True)
@@ -146,6 +154,7 @@ class CrawlDbPostgresTest(unittest.TestCase):
             crawls = crawl_db.get_user_crawls(1)
             self.assertEqual(crawls[0]['id'], crawl_id)
             self.assertEqual(crawl_db.get_crawl_count(1), 1)
+            self.assertEqual(crawl_db.get_crawl_status_counts(1), {'paused': 1})
 
         create_sql = ' '.join(self.conn.sql[0][0].split()).lower()
         self.assertIn('create table if not exists crawls', create_sql)
