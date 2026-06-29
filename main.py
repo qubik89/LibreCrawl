@@ -9,6 +9,7 @@ import argparse
 import secrets
 import string
 import os
+import multiprocessing
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
@@ -45,10 +46,11 @@ DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
+IS_MAIN_PROCESS = multiprocessing.current_process().name == 'MainProcess'
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
-if not os.environ.get('SECRET_KEY'):
+if IS_MAIN_PROCESS and not os.environ.get('SECRET_KEY'):
     print('⚠️  WARNING: SECRET_KEY not set — using an ephemeral random key. '
           'Sessions will not persist across restarts. Set SECRET_KEY in production.', flush=True)
 
@@ -56,7 +58,8 @@ if not os.environ.get('SECRET_KEY'):
 Compress(app)
 
 # Initialize database on startup
-init_db()
+if IS_MAIN_PROCESS:
+    init_db()
 
 def generate_random_password(length=16):
     """Generate a random password with letters, digits, and symbols"""
@@ -130,7 +133,7 @@ def skip_auth_login(username):
         print(f"Error in skip_auth_login: {e}")
         return False, f'Login error: {str(e)}'
 
-if LOCAL_MODE:
+if IS_MAIN_PROCESS and LOCAL_MODE:
     print("=" * 60)
     print("LOCAL MODE ENABLED")
     print("All users will have admin tier access")
@@ -138,26 +141,26 @@ if LOCAL_MODE:
     print("Auto-login enabled with 'local' admin account")
     print("=" * 60)
 
-if DISABLE_REGISTER:
+if IS_MAIN_PROCESS and DISABLE_REGISTER:
     print("=" * 60)
     print("REGISTRATION DISABLED")
     print("New user registrations are not allowed")
     print("=" * 60)
 
-if DISABLE_GUEST:
+if IS_MAIN_PROCESS and DISABLE_GUEST:
     print("=" * 60)
     print("GUEST MODE DISABLED")
     print("Guest login is not allowed")
     print("=" * 60)
 
-if DEMO_MODE:
+if IS_MAIN_PROCESS and DEMO_MODE:
     print("=" * 60)
     print("DEMO MODE ENABLED")
     print("Memory limit: 1.5GB per user")
     print("Crawls will auto-stop when limit is reached")
     print("=" * 60)
 
-if SKIP_AUTH:
+if IS_MAIN_PROCESS and SKIP_AUTH:
     print("=" * 60)
     print("⚠️  DANGEROUSLY SKIP AUTH ENABLED")
     print("Anyone can log in as any username with no password!")
