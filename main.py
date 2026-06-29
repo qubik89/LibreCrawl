@@ -1533,6 +1533,27 @@ def crawl_status_by_id(crawl_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _next_cursor(rows, current):
+    return rows[-1].get('_row_order', current) if rows else current
+
+def _offset_cursor(rows, offset):
+    return offset + len(rows) if rows else offset
+
+def _has_more(rows, limit):
+    return len(rows) >= limit
+
+def _page_limit(value, default=500, maximum=1000):
+    try:
+        return max(1, min(int(value or default), maximum))
+    except (TypeError, ValueError):
+        return default
+
+def _page_offset(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
 @app.route('/api/crawls/<int:crawl_id>/urls')
 @login_required
 def load_crawl_urls_page(crawl_id, limit=None, offset=None):
@@ -1548,18 +1569,27 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
         if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
-        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
-        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
+        offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
+        after = request.args.get('after', type=int)
+        after = _page_offset(after) if after is not None else None
+        kind = request.args.get('kind')
+        page_offset = after if after is not None else offset
+        cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_urls
-            clickhouse_page = load_urls(crawl_id, limit=limit, offset=offset)
+            filters = {'kind': kind} if kind else None
+            clickhouse_page = load_urls(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
+                rows = clickhouse_page['rows']
                 return jsonify({
                     'success': True,
                     'crawl_id': crawl_id,
-                    'urls': clickhouse_page['rows'],
+                    'urls': rows,
                     'limit': limit,
                     'offset': offset,
+                    'next_cursor': _next_cursor(rows, cursor_fallback),
+                    'has_more': _has_more(rows, limit),
                     'total': clickhouse_page['total'],
                     'source': 'clickhouse',
                 })
@@ -1567,12 +1597,15 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
             print(f"ClickHouse URL page unavailable for crawl {crawl_id}: {e}")
 
         counts = get_crawl_counts(crawl_id)
+        rows = load_crawled_urls(crawl_id, limit=limit, offset=page_offset)
         return jsonify({
             'success': True,
             'crawl_id': crawl_id,
-            'urls': load_crawled_urls(crawl_id, limit=limit, offset=offset),
+            'urls': rows,
             'limit': limit,
-            'offset': offset,
+            'offset': page_offset,
+            'next_cursor': _offset_cursor(rows, page_offset),
+            'has_more': _has_more(rows, limit),
             'total': counts['urls'],
         })
     except Exception as e:
@@ -1593,18 +1626,27 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
         if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
-        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
-        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
+        offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
+        after = request.args.get('after', type=int)
+        after = _page_offset(after) if after is not None else None
+        kind = request.args.get('kind')
+        page_offset = after if after is not None else offset
+        cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_links
-            clickhouse_page = load_links(crawl_id, limit=limit, offset=offset)
+            filters = {'kind': kind} if kind else None
+            clickhouse_page = load_links(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
+                rows = clickhouse_page['rows']
                 return jsonify({
                     'success': True,
                     'crawl_id': crawl_id,
-                    'links': clickhouse_page['rows'],
+                    'links': rows,
                     'limit': limit,
                     'offset': offset,
+                    'next_cursor': _next_cursor(rows, cursor_fallback),
+                    'has_more': _has_more(rows, limit),
                     'total': clickhouse_page['total'],
                     'source': 'clickhouse',
                 })
@@ -1612,12 +1654,15 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
             print(f"ClickHouse link page unavailable for crawl {crawl_id}: {e}")
 
         counts = get_crawl_counts(crawl_id)
+        rows = load_crawl_links(crawl_id, limit=limit, offset=page_offset)
         return jsonify({
             'success': True,
             'crawl_id': crawl_id,
-            'links': load_crawl_links(crawl_id, limit=limit, offset=offset),
+            'links': rows,
             'limit': limit,
-            'offset': offset,
+            'offset': page_offset,
+            'next_cursor': _offset_cursor(rows, page_offset),
+            'has_more': _has_more(rows, limit),
             'total': counts['links'],
         })
     except Exception as e:
@@ -1638,13 +1683,20 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
         if not user_can_access_crawl(crawl, user_id, session_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
 
-        limit = min(limit or request.args.get('limit', 500, type=int), 1000)
-        offset = offset if offset is not None else request.args.get('offset', 0, type=int)
+        limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
+        offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
+        after = request.args.get('after', type=int)
+        after = _page_offset(after) if after is not None else None
+        issue_type = request.args.get('issue_type')
+        page_offset = after if after is not None else offset
+        cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_issues
-            clickhouse_page = load_issues(crawl_id, limit=limit, offset=offset)
+            filters = {'issue_type': issue_type} if issue_type else None
+            clickhouse_page = load_issues(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
-                issues = clickhouse_page['rows']
+                rows = clickhouse_page['rows']
+                issues = rows
                 current_settings = get_session_settings().get_settings()
                 exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
                 exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
@@ -1655,6 +1707,8 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
                     'issues': issues,
                     'limit': limit,
                     'offset': offset,
+                    'next_cursor': _next_cursor(rows, cursor_fallback),
+                    'has_more': _has_more(rows, limit),
                     'total': clickhouse_page['total'],
                     'source': 'clickhouse',
                 })
@@ -1662,7 +1716,8 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
             print(f"ClickHouse issue page unavailable for crawl {crawl_id}: {e}")
 
         counts = get_crawl_counts(crawl_id)
-        issues = load_crawl_issues(crawl_id, limit=limit, offset=offset)
+        rows = load_crawl_issues(crawl_id, limit=limit, offset=page_offset)
+        issues = rows
         if issues:
             current_settings = get_session_settings().get_settings()
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
@@ -1673,8 +1728,41 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
             'crawl_id': crawl_id,
             'issues': issues,
             'limit': limit,
-            'offset': offset,
+            'offset': page_offset,
+            'next_cursor': _offset_cursor(rows, page_offset),
+            'has_more': _has_more(rows, limit),
             'total': counts['issues'],
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/crawls/<int:crawl_id>/samples')
+@login_required
+def crawl_samples_by_id(crawl_id):
+    """Load recent ClickHouse samples plus the existing crawl summary."""
+    try:
+        from src.crawl_db import get_crawl_by_id
+        from src.crawl_clickhouse import load_recent_issues, load_recent_urls
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        limit = _page_limit(request.args.get('limit', 20, type=int), default=20, maximum=100)
+        summary = build_crawl_summary(crawl_id) or {}
+        recent_urls = load_recent_urls(crawl_id, limit=limit) or {}
+        recent_issues = load_recent_issues(crawl_id, limit=limit) or {}
+        return jsonify({
+            'success': True,
+            'crawl_id': crawl_id,
+            'recent_urls': recent_urls.get('rows', []),
+            'recent_issues': recent_issues.get('rows', []),
+            'analytics': summary.get('analytics'),
+            'stats': summary.get('stats'),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1939,7 +2027,12 @@ def export_data():
 
         # Use local data if provided (from loaded crawl), otherwise get from crawler
         if crawl_id:
-            from src.crawl_db import load_crawled_urls, load_crawl_links, load_crawl_issues
+            from src.crawl_db import get_crawl_by_id, load_crawled_urls, load_crawl_links, load_crawl_issues
+            crawl = get_crawl_by_id(crawl_id)
+            if not crawl:
+                return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
             urls = load_crawled_urls(crawl_id)
             links = load_crawl_links(crawl_id)
             issues = load_crawl_issues(crawl_id)

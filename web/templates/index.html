@@ -157,6 +157,15 @@
                     </div>
                 </div>
 
+                <section class="live-sample-panel" id="liveSamplePanel" style="display: none;">
+                    <div>
+                        <strong>Live sample</strong>
+                        <span id="liveSampleMeta">Waiting for crawl data...</span>
+                    </div>
+                    <div id="liveSampleUrls"></div>
+                    <div id="liveSampleIssues"></div>
+                </section>
+
                 <div class="sidebar-section">
                     <h3 class="sidebar-title">Data Size</h3>
                     <div class="stats-container">
@@ -221,6 +230,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Load more</button>
                         </div>
 
                         <div id="internal-tab" class="tab-pane">
@@ -240,6 +250,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Load more</button>
                         </div>
 
                         <div id="external-tab" class="tab-pane">
@@ -259,6 +270,7 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Load more</button>
                         </div>
 
                         <div id="status-codes-tab" class="tab-pane">
@@ -347,6 +359,7 @@
                                     </div>
                                 </div>
                             </div>
+                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Load more</button>
                         </div>
 
                         <div id="issues-tab" class="tab-pane">
@@ -392,6 +405,7 @@
                                     </div>
                                 </div>
                             </div>
+                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Load more</button>
                         </div>
 
                         <div id="pagespeed-tab" class="tab-pane">

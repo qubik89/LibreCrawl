@@ -3,8 +3,27 @@ import sys
 import threading
 import types
 import unittest
+from unittest import mock
 
 from src import crawl_clickhouse
+
+
+class FakeQueryResult:
+    def __init__(self, rows):
+        self.result_rows = rows
+
+
+class FakeClickHouseClient:
+    def __init__(self, rows=None, total=1):
+        self.rows = rows or [(101, '{"url":"https://example.com/a"}')]
+        self.total = total
+        self.sql = []
+
+    def query(self, sql):
+        self.sql.append(sql)
+        if 'count()' in sql:
+            return FakeQueryResult([(self.total,)])
+        return FakeQueryResult(self.rows)
 
 
 class CrawlClickHouseTest(unittest.TestCase):
@@ -91,6 +110,44 @@ class CrawlClickHouseTest(unittest.TestCase):
                 sys.modules['clickhouse_connect'] = old_module
             crawl_clickhouse._client = old_client
             crawl_clickhouse._ready = old_ready
+
+    def test_load_urls_uses_cursor_filter_order_and_returns_row_order(self):
+        client = FakeClickHouseClient()
+
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            page = crawl_clickhouse.load_urls(
+                crawl_id=7,
+                limit=50,
+                after=100,
+                filters={'kind': 'internal'},
+            )
+
+        select_sql = client.sql[-1]
+        self.assertIn('row_order > 100', select_sql)
+        self.assertIn('is_internal = 1', select_sql)
+        self.assertIn('ORDER BY row_order ASC', select_sql)
+        self.assertNotIn('OFFSET', select_sql)
+        self.assertEqual(page['rows'][0]['_row_order'], 101)
+
+    def test_load_issues_allows_issue_type_filter(self):
+        client = FakeClickHouseClient(rows=[(101, '{"type":"warning"}')])
+
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            crawl_clickhouse.load_issues(
+                crawl_id=7,
+                limit=10,
+                filters={'issue_type': 'warning'},
+            )
+
+        self.assertIn("type = 'warning'", client.sql[-1])
+
+    def test_load_recent_urls_uses_descending_row_order(self):
+        client = FakeClickHouseClient()
+
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            crawl_clickhouse.load_recent_urls(crawl_id=7, limit=5)
+
+        self.assertIn('ORDER BY row_order DESC', client.sql[-1])
 
 
 if __name__ == '__main__':

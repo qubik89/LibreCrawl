@@ -264,45 +264,106 @@ def save_batches(crawl_id, urls=None, links=None, issues=None):
         return False
 
 
-def _query_json_rows(table, crawl_id, limit, offset):
+def _filter_conditions(table, filters):
+    filters = filters or {}
+    conditions = []
+    kind = filters.get('kind')
+    issue_type = filters.get('issue_type')
+
+    url_kinds = {
+        'internal': 'is_internal = 1',
+        'external': 'is_internal = 0',
+        '2xx': 'status_code >= 200 AND status_code < 300',
+        '3xx': 'status_code >= 300 AND status_code < 400',
+        '4xx': 'status_code >= 400 AND status_code < 500',
+        '5xx': 'status_code >= 500',
+        'no_response': "status_code = 0 AND error_type != 'file_too_large'",
+        'html': "positionCaseInsensitive(content_type, 'html') > 0",
+        'css': "positionCaseInsensitive(content_type, 'css') > 0",
+        'js': "positionCaseInsensitive(content_type, 'javascript') > 0",
+        'images': "positionCaseInsensitive(content_type, 'image') > 0",
+    }
+    link_kinds = {
+        'internal': 'is_internal = 1',
+        'external': 'is_internal = 0',
+        '2xx': 'target_status >= 200 AND target_status < 300',
+        '3xx': 'target_status >= 300 AND target_status < 400',
+        '4xx': 'target_status >= 400 AND target_status < 500',
+        '5xx': 'target_status >= 500',
+    }
+    if table == 'crawl_urls' and kind in url_kinds:
+        conditions.append(url_kinds[kind])
+    if table == 'crawl_links' and kind in link_kinds:
+        conditions.append(link_kinds[kind])
+    if table == 'crawl_issues' and issue_type in ('error', 'warning', 'info'):
+        conditions.append(f"type = '{issue_type}'")
+    return conditions
+
+
+def _query_json_rows(table, crawl_id, limit=500, offset=0, after=None, filters=None, descending=False):
     client = get_client()
     if not client:
         return None
 
     limit = max(0, min(int(limit), 5000))
     offset = max(0, int(offset))
+    crawl_id = int(crawl_id)
+    filter_conditions = _filter_conditions(table, filters)
+    base_conditions = [f'crawl_id = {crawl_id}'] + filter_conditions
+    where = ' AND '.join(base_conditions)
     try:
         total = client.query(
-            f'SELECT count() FROM {_table(table)} WHERE crawl_id = {int(crawl_id)}'
+            f'SELECT count() FROM {_table(table)} WHERE {where}'
         ).result_rows[0][0]
         if total == 0:
+            if filter_conditions or after is not None:
+                return {'total': 0, 'rows': []}
             return None
+        page_conditions = list(base_conditions)
+        if after is not None:
+            page_conditions.append(f'row_order > {int(after)}')
+        page_where = ' AND '.join(page_conditions)
+        order = 'DESC' if descending else 'ASC'
+        offset_clause = '' if after is not None else f' OFFSET {offset}'
         result = client.query(f'''
-            SELECT row_json
+            SELECT row_order, row_json
             FROM {_table(table)}
-            WHERE crawl_id = {int(crawl_id)}
-            ORDER BY row_order
-            LIMIT {limit} OFFSET {offset}
+            WHERE {page_where}
+            ORDER BY row_order {order}
+            LIMIT {limit}{offset_clause}
         ''')
+        rows = []
+        for row_order, row_json in result.result_rows:
+            row = json.loads(row_json)
+            row['_row_order'] = int(row_order)
+            rows.append(row)
         return {
             'total': int(total),
-            'rows': [json.loads(row[0]) for row in result.result_rows],
+            'rows': rows,
         }
     except Exception as e:
         print(f'ClickHouse page read failed for crawl {crawl_id}: {e}')
         return None
 
 
-def load_urls(crawl_id, limit=500, offset=0):
-    return _query_json_rows('crawl_urls', crawl_id, limit, offset)
+def load_urls(crawl_id, limit=500, offset=0, after=None, filters=None):
+    return _query_json_rows('crawl_urls', crawl_id, limit, offset, after, filters)
 
 
-def load_links(crawl_id, limit=500, offset=0):
-    return _query_json_rows('crawl_links', crawl_id, limit, offset)
+def load_links(crawl_id, limit=500, offset=0, after=None, filters=None):
+    return _query_json_rows('crawl_links', crawl_id, limit, offset, after, filters)
 
 
-def load_issues(crawl_id, limit=500, offset=0):
-    return _query_json_rows('crawl_issues', crawl_id, limit, offset)
+def load_issues(crawl_id, limit=500, offset=0, after=None, filters=None):
+    return _query_json_rows('crawl_issues', crawl_id, limit, offset, after, filters)
+
+
+def load_recent_urls(crawl_id, limit=20):
+    return _query_json_rows('crawl_urls', crawl_id, limit=limit, descending=True)
+
+
+def load_recent_issues(crawl_id, limit=20):
+    return _query_json_rows('crawl_issues', crawl_id, limit=limit, descending=True)
 
 
 def get_summary(crawl_id):

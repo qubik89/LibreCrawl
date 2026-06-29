@@ -27,13 +27,17 @@ let crawlState = {
     }
 };
 
-let serverPageOffsets = {
-    urls: 0,
-    links: 0,
-    issues: 0
+let serverPageState = {
+    urls: { nextCursor: null, loaded: 0, hasMore: true, filter: 'all' },
+    links: { nextCursor: null, loaded: 0, hasMore: true, filter: 'all' },
+    issues: { nextCursor: null, loaded: 0, hasMore: true, filter: 'all' }
 };
 
 const SERVER_PAGE_SIZE = 500;
+const CLIENT_ROW_LIMIT = 2000;
+const URL_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx', 'no_response', 'html', 'css', 'js', 'images'];
+const LINK_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx'];
+let sampleRefreshTimer = null;
 
 // Incremental polling instance
 let incrementalPoller = null;
@@ -154,7 +158,7 @@ function startCrawl() {
     crawlState.startTime = new Date();
     crawlState.baseUrl = url;
     crawlState.currentCrawlId = null;
-    resetServerOffsets();
+    resetServerPageState();
 
     // Initialize incremental poller for new crawl
     if (!incrementalPoller) {
@@ -204,6 +208,7 @@ function resumeCrawl() {
 function stopCrawl() {
     crawlState.isRunning = false;
     crawlState.isPaused = false;
+    stopSampleRefresh();
 
     // Update UI
     updateCrawlButtons();
@@ -231,7 +236,8 @@ function clearCrawlData() {
     crawlState.analytics = null;
     crawlState.baseUrl = null;
     crawlState.currentCrawlId = null;
-    resetServerOffsets();
+    resetServerPageState();
+    stopSampleRefresh();
     crawlState.filters.active = null;
     crawlState.pendingLinks = null;
     crawlState.pendingIssues = null;
@@ -297,6 +303,8 @@ function startPythonCrawl(url) {
             updateStatus('Crawling in progress...');
             // Refresh user info to update crawl count
             loadUserInfo();
+            loadActiveTabPage(true);
+            startSampleRefresh();
             // Start polling for updates
             pollCrawlProgress();
         } else {
@@ -332,10 +340,6 @@ async function pollCrawlProgress() {
         const response = await fetch(crawlId ? `/api/crawls/${crawlId}/status` : '/api/crawl_status');
         const data = await response.json();
 
-        if (crawlId) {
-            await fetchServerPageUpdates(crawlId, data);
-        }
-
         updateCrawlData(data);
 
         if (data.is_running_pagespeed) {
@@ -351,6 +355,7 @@ async function pollCrawlProgress() {
 
         if (data.status === 'demo_stopped' || data.demo_stopped) {
             crawlState.isRunning = false;
+            stopSampleRefresh();
             updateCrawlButtons();
             updateStatus('Demo limit reached — crawl data saved');
             showDemoLimitNotification();
@@ -358,6 +363,7 @@ async function pollCrawlProgress() {
             setTimeout(pollCrawlProgress, 1000);
         } else if (data.status === 'completed') {
             crawlState.isRunning = false;
+            stopSampleRefresh();
             updateCrawlButtons();
             hideProgress();
             updateStatus('Crawl completed');
@@ -369,6 +375,12 @@ async function pollCrawlProgress() {
                     stats: crawlState.stats
                 });
             }
+        } else if (data.status === 'failed' || data.status === 'stopped') {
+            crawlState.isRunning = false;
+            stopSampleRefresh();
+            updateCrawlButtons();
+            hideProgress();
+            updateStatus(data.status === 'failed' ? 'Crawl failed' : 'Crawl stopped');
         }
     } catch (error) {
         console.error('Error polling crawl status:', error);
@@ -378,28 +390,178 @@ async function pollCrawlProgress() {
     }
 }
 
-function resetServerOffsets() {
-    serverPageOffsets = { urls: 0, links: 0, issues: 0 };
+function resetServerPageState(kind = null) {
+    const empty = filter => ({ nextCursor: null, loaded: 0, hasMore: true, filter });
+    if (kind) {
+        serverPageState[kind] = empty(serverPageState[kind]?.filter || 'all');
+        return;
+    }
+    serverPageState = {
+        urls: empty('all'),
+        links: empty('all'),
+        issues: empty('all')
+    };
 }
 
-async function fetchServerPageUpdates(crawlId, data) {
-    const [urls, links, issues] = await Promise.all([
-        fetch(`/api/crawls/${crawlId}/urls?offset=${serverPageOffsets.urls}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json()),
-        fetch(`/api/crawls/${crawlId}/links?offset=${serverPageOffsets.links}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json()),
-        fetch(`/api/crawls/${crawlId}/issues?offset=${serverPageOffsets.issues}&limit=${SERVER_PAGE_SIZE}`).then(r => r.json())
-    ]);
+function getActiveTabName() {
+    const pane = document.querySelector('.tab-pane.active');
+    return pane ? pane.id.replace(/-tab$/, '') : 'overview';
+}
 
-    data.urls = urls.urls || [];
-    data.links = links.links || [];
-    data.issues = issues.issues || [];
-    serverPageOffsets.urls += data.urls.length;
-    serverPageOffsets.links += data.links.length;
-    serverPageOffsets.issues += data.issues.length;
+function getActiveServerTarget() {
+    const tabName = getActiveTabName();
+    if (['overview', 'internal', 'external'].includes(tabName)) {
+        const activeFilter = crawlState.filters.active || 'all';
+        const serverKind = URL_SERVER_KINDS.includes(activeFilter)
+            ? activeFilter
+            : (tabName === 'overview' ? 'all' : tabName);
+        return {
+            kind: 'urls',
+            filter: `${tabName}:${activeFilter}`,
+            params: serverKind === 'all' ? {} : { kind: serverKind }
+        };
+    }
+    if (tabName === 'links') {
+        const linkKind = getActiveLinkServerKind();
+        return {
+            kind: 'links',
+            filter: JSON.stringify(crawlState.filters.linksFilter),
+            params: linkKind ? { kind: linkKind } : {}
+        };
+    }
+    if (tabName === 'issues') {
+        const issueType = crawlState.filters.issueFilter || 'all';
+        return {
+            kind: 'issues',
+            filter: issueType,
+            params: issueType === 'all' ? {} : { issue_type: issueType }
+        };
+    }
+    return null;
+}
+
+function getActiveLinkServerKind() {
+    const filters = crawlState.filters.linksFilter;
+    const internalStatus = filters.internalStatusCode;
+    const externalStatus = filters.externalStatusCode;
+    if (internalStatus !== 'all' && externalStatus !== 'all' && internalStatus !== externalStatus) return null;
+    if (LINK_SERVER_KINDS.includes(internalStatus) && internalStatus !== 'all') return internalStatus;
+    if (LINK_SERVER_KINDS.includes(externalStatus) && externalStatus !== 'all') return externalStatus;
+    return null;
+}
+
+async function loadActiveTabPage(reset = false) {
+    const target = getActiveServerTarget();
+    if (!target) return;
+    return loadServerRows(target.kind, reset);
+}
+
+async function loadServerRows(kind, reset = false) {
+    const crawlId = crawlState.currentCrawlId;
+    const target = getActiveServerTarget();
+    if (!crawlId || !target || target.kind !== kind) return;
+
+    const state = serverPageState[kind];
+    const filterChanged = state.filter !== target.filter;
+    if (reset || filterChanged) {
+        state.nextCursor = null;
+        state.loaded = 0;
+        state.hasMore = true;
+        state.filter = target.filter;
+        clearServerRows(kind);
+    }
+    if (!state.hasMore) return;
+
+    const params = new URLSearchParams({ limit: SERVER_PAGE_SIZE });
+    if (state.nextCursor !== null && state.nextCursor !== undefined) {
+        params.set('after', state.nextCursor);
+    }
+    Object.entries(target.params).forEach(([key, value]) => params.set(key, value));
+
+    try {
+        const response = await fetch(`/api/crawls/${crawlId}/${kind}?${params.toString()}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || `Failed to load ${kind}`);
+
+        const rows = data[kind] || [];
+        appendServerRows(kind, rows);
+
+        const inferredCursor = rows.length ? rows[rows.length - 1]._row_order : null;
+        const nextCursor = data.next_cursor ?? inferredCursor;
+        state.nextCursor = nextCursor ?? state.nextCursor;
+        state.loaded += rows.length;
+        state.hasMore = typeof data.has_more === 'boolean'
+            ? data.has_more
+            : Boolean(nextCursor) && rows.length >= SERVER_PAGE_SIZE;
+    } catch (error) {
+        console.error(`Error loading ${kind}:`, error);
+    }
+}
+
+function clearServerRows(kind) {
+    if (kind === 'urls') {
+        crawlState.urls = [];
+        refreshUrlTables();
+    } else if (kind === 'links') {
+        crawlState.links = [];
+        updateLinksTable([]);
+    } else if (kind === 'issues') {
+        crawlState.issues = [];
+        updateIssuesTable([]);
+    }
+}
+
+function mergeRows(existing, rows, keyFn) {
+    const byKey = new Map();
+    existing.concat(rows).forEach(row => {
+        const key = keyFn(row);
+        if (key) byKey.set(key, row);
+    });
+    return Array.from(byKey.values()).slice(-CLIENT_ROW_LIMIT);
+}
+
+function appendServerRows(kind, rows) {
+    if (!rows.length) return;
+
+    if (kind === 'urls') {
+        crawlState.urls = mergeRows(crawlState.urls, rows, row => row.url);
+        refreshUrlTables();
+    } else if (kind === 'links') {
+        crawlState.links = mergeRows(
+            crawlState.links,
+            rows,
+            row => `${row.source_url}|${row.target_url}|${row.anchor_text || ''}`
+        );
+        updateLinksTable(crawlState.links);
+    } else if (kind === 'issues') {
+        crawlState.issues = mergeRows(
+            crawlState.issues,
+            rows,
+            row => row._row_order || `${row.url}|${row.type}|${row.category}|${row.issue}|${row.details}`
+        );
+        updateIssuesTable(crawlState.issues);
+        if (crawlState.filters.issueFilter !== 'all') {
+            applyIssueFilterToScroller();
+        }
+    }
+}
+
+function refreshUrlTables() {
+    if (crawlState.filters.active) {
+        filterVirtualScrollerData('overview', crawlState.filters.active);
+        filterVirtualScrollerData('internal', crawlState.filters.active);
+        filterVirtualScrollerData('external', crawlState.filters.active);
+    } else {
+        if (virtualScrollers.overview) virtualScrollers.overview.setData(crawlState.urls);
+        if (virtualScrollers.internal) virtualScrollers.internal.setData(crawlState.urls.filter(url => url.is_internal));
+        if (virtualScrollers.external) virtualScrollers.external.setData(crawlState.urls.filter(url => !url.is_internal));
+    }
+    updateStatusCodesTable(crawlState.filters.active);
 }
 
 async function attachToServerCrawl(crawlId) {
     crawlState.currentCrawlId = crawlId;
-    resetServerOffsets();
+    resetServerPageState();
     clearAllTables();
     resetStats();
 
@@ -407,7 +569,6 @@ async function attachToServerCrawl(crawlId) {
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to attach crawl');
 
-    await fetchServerPageUpdates(crawlId, data);
     crawlState.baseUrl = data.stats?.baseUrl || '';
     if (crawlState.baseUrl) document.getElementById('urlInput').value = crawlState.baseUrl;
 
@@ -416,6 +577,8 @@ async function attachToServerCrawl(crawlId) {
     crawlState.startTime = crawlState.isRunning ? new Date() : null;
     if (crawlState.isRunning) showProgress();
     updateCrawlData(data);
+    loadActiveTabPage(true);
+    if (crawlState.isRunning) startSampleRefresh();
     updateCrawlButtons();
     updateStatus(crawlState.isRunning ? 'Attached to running crawl' : `Loaded crawl: ${data.stats?.crawled || 0} URLs`);
 
@@ -547,6 +710,91 @@ function updateMemoryDisplay(memoryData, memoryDataSizes) {
     // System available
     const availableMB = memoryData.system?.available_mb || 0;
     document.getElementById('memAvailable').textContent = availableMB.toFixed(0) + ' MB';
+}
+
+function startSampleRefresh() {
+    if (!crawlState.currentCrawlId) return;
+    stopSampleRefresh(false);
+    refreshLiveSamples();
+    sampleRefreshTimer = setInterval(refreshLiveSamples, 5000);
+}
+
+function stopSampleRefresh(hidePanel = true) {
+    if (sampleRefreshTimer) {
+        clearInterval(sampleRefreshTimer);
+        sampleRefreshTimer = null;
+    }
+    if (hidePanel) {
+        const panel = document.getElementById('liveSamplePanel');
+        if (panel) panel.style.display = 'none';
+    }
+}
+
+async function refreshLiveSamples() {
+    const crawlId = crawlState.currentCrawlId;
+    if (!crawlId || !crawlState.isRunning) return;
+
+    try {
+        const response = await fetch(`/api/crawls/${crawlId}/samples?limit=10`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load samples');
+
+        const panel = document.getElementById('liveSamplePanel');
+        const meta = document.getElementById('liveSampleMeta');
+        if (!panel || !meta) return;
+
+        const analytics = data.analytics || crawlState.analytics || {};
+        const stats = data.stats || crawlState.stats || {};
+        const counts = analytics.counts || {};
+        const totalUrls = counts.urls ?? stats.crawled ?? 0;
+        const totalIssues = counts.issues ?? Object.values(analytics.issue_type_counts || {}).reduce((sum, count) => sum + count, 0);
+        meta.textContent = `Latest sample from ${totalUrls} URLs and ${totalIssues} issues`;
+
+        renderSampleRows('liveSampleUrls', sampleRows(data.recent_urls), row => {
+            const status = row.status_code ? ` ${row.status_code}` : '';
+            return `${row.url || ''}${status}`;
+        }, 'No URL samples yet');
+        renderSampleRows('liveSampleIssues', sampleRows(data.recent_issues), row => {
+            return `${row.type || 'issue'}: ${row.issue || row.category || ''} ${row.url || ''}`;
+        }, 'No issue samples yet');
+
+        panel.style.display = 'block';
+    } catch (error) {
+        console.error('Error refreshing live samples:', error);
+    }
+}
+
+function sampleRows(value) {
+    return (Array.isArray(value) ? value : value?.rows || []).slice(-10);
+}
+
+function renderSampleRows(containerId, rows, formatter, emptyText) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    container.innerHTML = '';
+    const title = document.createElement('strong');
+    title.textContent = containerId === 'liveSampleUrls' ? 'Sample URLs' : 'Sample issues';
+    container.appendChild(title);
+
+    if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.textContent = emptyText;
+        empty.style.opacity = '0.7';
+        container.appendChild(empty);
+        return;
+    }
+
+    rows.forEach(row => {
+        const item = document.createElement('div');
+        item.textContent = truncateText(formatter(row), 140);
+        container.appendChild(item);
+    });
+}
+
+function truncateText(text, maxLength) {
+    text = String(text || '');
+    return text.length > maxLength ? text.slice(0, maxLength - 3) + '...' : text;
 }
 
 function updateCrawlButtons() {
@@ -798,7 +1046,11 @@ function updateLinksTable(links) {
 }
 
 function applyLinksFilter() {
-    if (!crawlState.links || crawlState.links.length === 0) return;
+    if (!crawlState.links || crawlState.links.length === 0) {
+        if (virtualScrollers.internalLinks) virtualScrollers.internalLinks.setData([]);
+        if (virtualScrollers.externalLinks) virtualScrollers.externalLinks.setData([]);
+        return;
+    }
 
     // Separate internal and external links
     let internalLinks = crawlState.links.filter(link => link.is_internal);
@@ -869,11 +1121,13 @@ function applyLinksFilter() {
 function filterInternalLinks(filterType) {
     crawlState.filters.linksFilter.internalStatusCode = filterType;
     applyLinksFilter();
+    loadActiveTabPage(true);
 }
 
 function filterExternalLinks(filterType) {
     crawlState.filters.linksFilter.externalStatusCode = filterType;
     applyLinksFilter();
+    loadActiveTabPage(true);
 }
 
 function searchInternalLinks(searchText) {
@@ -1068,6 +1322,10 @@ function switchTab(tabName) {
     if (pluginTab && pluginTab.classList.contains('plugin-tab')) {
         handlePluginTabSwitch(tabName);
     }
+
+    if (['overview', 'internal', 'external', 'links', 'issues'].includes(tabName)) {
+        loadActiveTabPage(true);
+    }
 }
 
 // Handle plugin tab activation
@@ -1138,6 +1396,13 @@ function filterIssues(filterType) {
         }
     });
 
+    applyIssueFilterToScroller();
+    loadActiveTabPage(true);
+}
+
+function applyIssueFilterToScroller() {
+    const filterType = crawlState.filters.issueFilter;
+
     // Filter issues data and update virtual scroller
     if (window.currentIssues && virtualScrollers.issues) {
         let filteredIssues = window.currentIssues;
@@ -1160,6 +1425,7 @@ function toggleFilter(filterType) {
 
     // Apply filter to tables
     applyFilter(filterType);
+    loadActiveTabPage(true);
 }
 
 function applyFilter(filterType) {
@@ -1601,28 +1867,32 @@ async function exportData() {
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
-        // Check if there's data to export - always fetch fresh data from backend
+        // Check if there's data to export
         let hasData = false;
         let exportUrls = [];
         let exportLinks = [];
         let exportIssues = [];
 
-        // Always fetch from backend to ensure we have the latest data including links
-        const status = await fetch('/api/crawl_status');
-        const statusData = await status.json();
+        if (crawlState.currentCrawlId) {
+            hasData = true;
+        } else {
+            // Always fetch from backend to ensure we have the latest data including links
+            const status = await fetch('/api/crawl_status');
+            const statusData = await status.json();
 
-        if (statusData.urls && statusData.urls.length > 0) {
-            hasData = true;
-            exportUrls = statusData.urls;
-            exportLinks = statusData.links || [];
-            exportIssues = statusData.issues || [];
-        } else if (crawlState.urls && crawlState.urls.length > 0) {
-            // Fallback to local state if backend has no data (e.g., loaded crawl)
-            hasData = true;
-            exportUrls = crawlState.urls;
-            // Get links and issues from stored state
-            exportLinks = crawlState.links || [];
-            exportIssues = crawlState.issues || window.currentIssues || [];
+            if (statusData.urls && statusData.urls.length > 0) {
+                hasData = true;
+                exportUrls = statusData.urls;
+                exportLinks = statusData.links || [];
+                exportIssues = statusData.issues || [];
+            } else if (crawlState.urls && crawlState.urls.length > 0) {
+                // Fallback to local state if backend has no data (e.g., loaded crawl)
+                hasData = true;
+                exportUrls = crawlState.urls;
+                // Get links and issues from stored state
+                exportLinks = crawlState.links || [];
+                exportIssues = crawlState.issues || window.currentIssues || [];
+            }
         }
 
         if (!hasData) {
@@ -1632,23 +1902,27 @@ async function exportData() {
 
         showNotification('Preparing export...', 'info');
 
-        // Request export from backend, including local data if available
+        const exportPayload = {
+            format: exportFormat,
+            fields: exportFields
+        };
+        if (crawlState.currentCrawlId) {
+            exportPayload.crawlId = crawlState.currentCrawlId;
+        } else {
+            exportPayload.localData = {
+                urls: exportUrls,
+                links: exportLinks,
+                issues: exportIssues
+            };
+        }
+
+        // Request export from backend
         const exportResponse = await fetch('/api/export_data', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                format: exportFormat,
-                fields: exportFields,
-                crawlId: crawlState.currentCrawlId,
-                // Send local data if we have it (for loaded crawls)
-                localData: {
-                    urls: exportUrls,
-                    links: exportLinks,
-                    issues: exportIssues
-                }
-            })
+            body: JSON.stringify(exportPayload)
         });
 
         const exportData = await exportResponse.json();

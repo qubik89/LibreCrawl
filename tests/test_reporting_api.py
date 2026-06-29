@@ -106,6 +106,30 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(response, ({'success': False, 'error': 'Authentication required'}, 401))
         self.assertEqual(main.session, {})
 
+    def test_page_limit_and_offset_are_clamped(self):
+        self.assertEqual(main._page_limit(-1), 1)
+        self.assertEqual(main._page_limit(5000), 1000)
+        self.assertEqual(main._page_limit('bad'), 500)
+        self.assertEqual(main._page_offset(-10), 0)
+        self.assertEqual(main._page_offset('bad'), 0)
+
+    def test_export_data_rejects_unauthorized_crawl_id(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.path = '/api/export_data'
+
+        with mock.patch.object(main.request, 'get_json', return_value={'crawlId': 42, 'format': 'csv', 'fields': ['url']}):
+            with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+                'id': 42,
+                'user_id': 99,
+                'session_id': 'session-b',
+            }):
+                with mock.patch('src.crawl_db.load_crawled_urls') as load_urls:
+                    response, status = main.export_data()
+
+        self.assertEqual(status, 403)
+        self.assertFalse(response['success'])
+        load_urls.assert_not_called()
+
     def test_report_settings_update_preserves_blank_or_missing_key(self):
         self.assertEqual(
             main.report_settings_update_from_payload({
