@@ -74,9 +74,9 @@ async function loadDashboardCrawls() {
                 <tr>
                     <td>${date}</td>
                     <td>${domain}</td>
-                    <td>${crawled}</td>
-                    <td>${crawl.link_count || '-'}</td>
-                    <td>${crawl.issue_count || '-'}</td>
+                    <td>${formatNumber(crawled)}</td>
+                    <td>${crawl.link_count ? formatNumber(crawl.link_count) : '-'}</td>
+                    <td>${crawl.issue_count ? formatNumber(crawl.issue_count) : '-'}</td>
                     <td>
                         <div class="progress-bar" style="height: 6px;">
                             <div class="progress-fill" style="width: ${progress}%"></div>

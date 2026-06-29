@@ -307,6 +307,10 @@
     <script>
         let reportActionsEnabled = false;
 
+        function formatNumber(value, options = {}) {
+            return Number(value || 0).toLocaleString(undefined, options);
+        }
+
         async function loadReportPermissions() {
             try {
                 const response = await fetch('/api/user/info');
@@ -323,10 +327,10 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    document.getElementById('total-crawls').textContent = data.total_crawls || 0;
-                    document.getElementById('completed-crawls').textContent = data.by_status.completed || 0;
-                    document.getElementById('running-crawls').textContent = (data.by_status.running || 0) + (data.by_status.paused || 0);
-                    document.getElementById('db-size').textContent = (data.database_size_mb || 0).toFixed(1) + ' MB';
+                    document.getElementById('total-crawls').textContent = formatNumber(data.total_crawls);
+                    document.getElementById('completed-crawls').textContent = formatNumber(data.by_status.completed);
+                    document.getElementById('running-crawls').textContent = formatNumber((data.by_status.running || 0) + (data.by_status.paused || 0));
+                    document.getElementById('db-size').textContent = formatNumber(data.database_size_mb, { maximumFractionDigits: 1 }) + ' MB';
                 }
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -355,7 +359,7 @@
                                 <td>${started}</td>
                                 <td><a href="${crawl.base_url}" target="_blank" class="url-link">${crawl.base_url}</a></td>
                                 <td><span class="status-badge status-${crawl.status}">${crawl.status}</span></td>
-                                <td>${crawled}</td>
+                                <td>${formatNumber(crawled)}</td>
                                 <td>
                                     <div style="height: 6px; background: #e5e7eb; border-radius: 999px; overflow: hidden;">
                                         <div style="height: 100%; width: ${progress}%; background: #3b82f6;"></div>

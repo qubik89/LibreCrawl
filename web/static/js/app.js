@@ -38,6 +38,10 @@ const CLIENT_ROW_LIMIT = 2000;
 const URL_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx', 'no_response', 'html', 'css', 'js', 'images'];
 const LINK_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx'];
 
+function formatNumber(value, options = {}) {
+    return Number(value || 0).toLocaleString(undefined, options);
+}
+
 // Incremental polling instance
 let incrementalPoller = null;
 
@@ -665,9 +669,9 @@ function updateProgressText(data) {
         if (stats.crawled === 0) {
             progressText.textContent = 'Starting crawl...';
         } else if (stats.discovered > stats.crawled) {
-            progressText.textContent = `Crawling... (${stats.crawled}/${stats.discovered} URLs)`;
+            progressText.textContent = `Crawling... (${formatNumber(stats.crawled)}/${formatNumber(stats.discovered)} URLs)`;
         } else {
-            progressText.textContent = `Finishing up... (${stats.crawled} URLs crawled)`;
+            progressText.textContent = `Finishing up... (${formatNumber(stats.crawled)} URLs crawled)`;
         }
     } else {
         progressText.textContent = 'Initializing...';
@@ -675,10 +679,10 @@ function updateProgressText(data) {
 }
 
 function updateStatsDisplay() {
-    document.getElementById('discoveredCount').textContent = crawlState.stats.discovered;
-    document.getElementById('crawledCount').textContent = crawlState.stats.crawled;
-    document.getElementById('crawlDepth').textContent = crawlState.stats.depth;
-    document.getElementById('crawlSpeed').textContent = crawlState.stats.speed + ' URLs/sec';
+    document.getElementById('discoveredCount').textContent = formatNumber(crawlState.stats.discovered);
+    document.getElementById('crawledCount').textContent = formatNumber(crawlState.stats.crawled);
+    document.getElementById('crawlDepth').textContent = formatNumber(crawlState.stats.depth);
+    document.getElementById('crawlSpeed').textContent = formatNumber(crawlState.stats.speed, { maximumFractionDigits: 2 }) + ' URLs/sec';
 }
 
 function updateMemoryDisplay(memoryData, memoryDataSizes) {
@@ -1074,10 +1078,10 @@ function updateIssuesTable(issues) {
     }
 
     // Update filter counts
-    document.getElementById('issues-all-count').textContent = `(${totalIssues})`;
-    document.getElementById('issues-error-count').textContent = `(${errorCount})`;
-    document.getElementById('issues-warning-count').textContent = `(${warningCount})`;
-    document.getElementById('issues-info-count').textContent = `(${infoCount})`;
+    document.getElementById('issues-all-count').textContent = `(${formatNumber(totalIssues)})`;
+    document.getElementById('issues-error-count').textContent = `(${formatNumber(errorCount)})`;
+    document.getElementById('issues-warning-count').textContent = `(${formatNumber(warningCount)})`;
+    document.getElementById('issues-info-count').textContent = `(${formatNumber(infoCount)})`;
 
     // Show/hide empty state
     if (issues.length === 0) {
@@ -1101,7 +1105,7 @@ function updateIssuesTable(issues) {
             if (errorCount > 0) badgeColor = '#ef4444';
             else if (warningCount > 0) badgeColor = '#f59e0b';
 
-            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${totalIssues}</span>`;
+            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(totalIssues)}</span>`;
         } else {
             issuesTabButton.innerHTML = 'Issues';
         }
@@ -1506,7 +1510,7 @@ function updateFilterCounts() {
     Object.keys(counts).forEach(key => {
         const element = document.getElementById(key + '-count');
         if (element) {
-            element.textContent = counts[key];
+            element.textContent = formatNumber(counts[key]);
         }
     });
 }
@@ -1634,7 +1638,7 @@ function updateStatusCodesTable(filterType = null) {
         addRowToTable('statusCodesTableBody', [
             displayCode,
             statusText,
-            count,
+            formatNumber(count),
             percentage + '%'
         ]);
     });
@@ -2321,7 +2325,7 @@ function loadCrawl() {
                             let badgeColor = '#3b82f6';
                             if (errorCount > 0) badgeColor = '#ef4444';
                             else if (warningCount > 0) badgeColor = '#f59e0b';
-                            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${filteredIssues.length}</span>`;
+                            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(filteredIssues.length)}</span>`;
                         }
                     }
                 } catch (error) {
