@@ -142,8 +142,10 @@ class WebCrawler:
         self.resume_mode = resume_from_db
         self.auto_save_interval = 30  # seconds
         self.queue_checkpoint_interval = 300  # seconds
+        self.stats_save_interval = 60  # seconds
         self.batch_save_size = 50  # URLs before triggering save
         self.last_save_time = time.time()
+        self.last_stats_save_time = 0
         self.last_queue_checkpoint_time = 0
         self.unsaved_urls = []
         self.unsaved_links = []
@@ -693,24 +695,28 @@ class WebCrawler:
                 self.unsaved_links.clear()
                 self.unsaved_issues.clear()
 
-            # Update statistics
-            memory_stats = self.memory_monitor.get_stats()
-            update_crawl_stats(
-                self.crawl_id,
-                discovered=self.stats['discovered'],
-                crawled=self.stats['crawled'],
-                max_depth=self.stats['depth'],
-                peak_memory_mb=memory_stats.get('peak_mb', 0),
-                estimated_size_mb=memory_stats.get('estimated_crawl_mb', 0)
-            )
+            now = time.time()
+            stats_saved = False
+            if force or now - self.last_stats_save_time >= self.stats_save_interval:
+                memory_stats = self.memory_monitor.get_stats()
+                update_crawl_stats(
+                    self.crawl_id,
+                    discovered=self.stats['discovered'],
+                    crawled=self.stats['crawled'],
+                    max_depth=self.stats['depth'],
+                    peak_memory_mb=memory_stats.get('peak_mb', 0),
+                    estimated_size_mb=memory_stats.get('estimated_crawl_mb', 0)
+                )
+                self.last_stats_save_time = now
+                stats_saved = True
 
-            self.last_save_time = time.time()
+            self.last_save_time = now
             if has_rows:
                 print(
                     f"Saved batch for crawl {self.crawl_id} "
-                    f"(sqlite_rows={sqlite_rows_saved}, clickhouse_rows={clickhouse_rows_saved})"
+                    f"(sqlite_rows={sqlite_rows_saved}, clickhouse_rows={clickhouse_rows_saved}, stats={stats_saved})"
                 )
-            else:
+            elif stats_saved:
                 print(f"Saved crawl stats to database for crawl {self.crawl_id}")
 
         except Exception as e:

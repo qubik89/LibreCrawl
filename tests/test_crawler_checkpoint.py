@@ -85,6 +85,36 @@ class CrawlerCheckpointTests(unittest.TestCase):
             else:
                 os.environ['CRAWL_RESULT_STORAGE'] = old_storage
 
+    def test_crawl_stats_are_throttled_unless_forced(self):
+        old_storage = os.environ.get('CRAWL_RESULT_STORAGE')
+        crawler = WebCrawler()
+        crawler.crawl_id = 10
+        crawler.db_save_enabled = True
+        crawler.stats_save_interval = 60
+        crawler.last_stats_save_time = 1000
+        crawler.stats.update({'discovered': 5, 'crawled': 2, 'depth': 1})
+
+        try:
+            os.environ['CRAWL_RESULT_STORAGE'] = 'clickhouse'
+            with (
+                mock.patch('src.crawl_db.update_crawl_stats') as update_stats,
+                mock.patch('src.crawler.time.time', side_effect=[1010, 1070, 1070]),
+            ):
+                crawler._save_batch_to_db()
+                crawler._save_batch_to_db()
+
+            self.assertEqual(update_stats.call_count, 1)
+
+            with mock.patch('src.crawl_db.update_crawl_stats') as update_stats:
+                crawler._save_batch_to_db(force=True)
+
+            self.assertEqual(update_stats.call_count, 1)
+        finally:
+            if old_storage is None:
+                os.environ.pop('CRAWL_RESULT_STORAGE', None)
+            else:
+                os.environ['CRAWL_RESULT_STORAGE'] = old_storage
+
 
 if __name__ == '__main__':
     unittest.main()
