@@ -181,6 +181,8 @@ class WebCrawler:
         self.unsaved_links = []
         self.unsaved_issues = []
         self.db_save_lock = threading.Lock()
+        self.db_write_lock = threading.Lock()
+        self.save_requested = threading.Event()
         self.auto_save_thread = None
         self.db_save_enabled = False  # Only enable when crawl_id is set
         self.html_process_pool = None
@@ -248,6 +250,20 @@ class WebCrawler:
             f"links={stats['links']} issues={stats['issues']}",
             flush=True,
         )
+
+    def _queue_db_rows(self, urls=None, links=None, issues=None):
+        if not self.db_save_enabled or not self.crawl_id:
+            return
+        with self.db_save_lock:
+            if urls:
+                self.unsaved_urls.extend(urls)
+            if links:
+                self.unsaved_links.extend(links)
+            if issues:
+                self.unsaved_issues.extend(issues)
+            should_save = len(self.unsaved_urls) >= self.batch_save_size
+        if should_save:
+            self.save_requested.set()
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -746,11 +762,36 @@ class WebCrawler:
         if not self.db_save_enabled or not self.crawl_id:
             return
 
-        wait_start = time.perf_counter()
         with self.db_save_lock:
+            urls_to_save = self.unsaved_urls
+            links_to_save = self.unsaved_links
+            issues_to_save = self.unsaved_issues
+            self.unsaved_urls = []
+            self.unsaved_links = []
+            self.unsaved_issues = []
+
+        has_rows = bool(urls_to_save or links_to_save or issues_to_save)
+        with self.db_save_lock:
+            has_newer_rows = bool(self.unsaved_urls or self.unsaved_links or self.unsaved_issues)
+        if has_newer_rows:
+            self.save_requested.set()
+
+        wait_start = time.perf_counter()
+        with self.db_write_lock:
             save_start = time.perf_counter()
-            self._save_batch_to_db_locked(force=force)
+            saved = self._save_batch_to_db_locked(
+                force=force,
+                urls_to_save=urls_to_save,
+                links_to_save=links_to_save,
+                issues_to_save=issues_to_save,
+            )
             save_ms = (time.perf_counter() - save_start) * 1000
+        if has_rows and not saved:
+            with self.db_save_lock:
+                self.unsaved_urls = urls_to_save + self.unsaved_urls
+                self.unsaved_links = links_to_save + self.unsaved_links
+                self.unsaved_issues = issues_to_save + self.unsaved_issues
+            self.save_requested.set()
         self._perf_add(
             save_calls=1,
             save_ms=save_ms,
@@ -758,13 +799,13 @@ class WebCrawler:
         )
         self._maybe_log_perf()
 
-    def _save_batch_to_db_locked(self, force=False):
+    def _save_batch_to_db_locked(self, force=False, urls_to_save=None, links_to_save=None, issues_to_save=None):
         from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
 
         try:
-            urls_to_save = list(self.unsaved_urls)
-            links_to_save = list(self.unsaved_links)
-            issues_to_save = list(self.unsaved_issues)
+            urls_to_save = urls_to_save or []
+            links_to_save = links_to_save or []
+            issues_to_save = issues_to_save or []
             has_rows = bool(urls_to_save or links_to_save or issues_to_save)
             storage_mode = result_storage_mode()
             sqlite_rows_saved = False
@@ -786,24 +827,17 @@ class WebCrawler:
 
             if save_rows_to_sqlite:
                 # Save URLs
-                if self.unsaved_urls:
-                    save_url_batch(self.crawl_id, self.unsaved_urls)
-                    self.unsaved_urls.clear()
+                if urls_to_save:
+                    save_url_batch(self.crawl_id, urls_to_save)
 
                 # Save links
-                if self.unsaved_links:
-                    save_links_batch(self.crawl_id, self.unsaved_links)
-                    self.unsaved_links.clear()
+                if links_to_save:
+                    save_links_batch(self.crawl_id, links_to_save)
 
                 # Save issues
-                if self.unsaved_issues:
-                    save_issues_batch(self.crawl_id, self.unsaved_issues)
-                    self.unsaved_issues.clear()
+                if issues_to_save:
+                    save_issues_batch(self.crawl_id, issues_to_save)
                 sqlite_rows_saved = has_rows
-            elif clickhouse_rows_saved:
-                self.unsaved_urls.clear()
-                self.unsaved_links.clear()
-                self.unsaved_issues.clear()
 
             now = time.time()
             stats_saved = False
@@ -828,11 +862,13 @@ class WebCrawler:
                 )
             elif stats_saved:
                 self._log_verbose(f"Saved crawl stats to database for crawl {self.crawl_id}")
+            return not has_rows or sqlite_rows_saved or clickhouse_rows_saved
 
         except Exception as e:
             print(f"Error saving batch to database: {e}")
             import traceback
             traceback.print_exc()
+            return False
 
     def _save_queue_checkpoint(self, force=False):
         """Save current queue state for crash recovery"""
@@ -866,8 +902,10 @@ class WebCrawler:
         """Background thread for periodic saves"""
         def auto_save_worker():
             while self.is_running:
-                time.sleep(5)  # Check every 5 seconds
-                if time.time() - self.last_save_time >= self.auto_save_interval:
+                requested = self.save_requested.wait(timeout=5)
+                if requested:
+                    self.save_requested.clear()
+                if requested or time.time() - self.last_save_time >= self.auto_save_interval:
                     self._save_batch_to_db()
                     self._save_queue_checkpoint()
 
@@ -1044,8 +1082,7 @@ class WebCrawler:
                                         if issues_after > issues_before:
                                             new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
                                             self.user_memory.track_issues(new_issues)
-                                            if self.db_save_enabled:
-                                                self.unsaved_issues.extend(new_issues)
+                                            self._queue_db_rows(issues=new_issues)
                                 except Exception as e:
                                     print(f"Error in crawl task: {e}")
 
@@ -1269,8 +1306,7 @@ class WebCrawler:
                                 ]
 
                         self.user_memory.track_links(new_links)
-                        if self.db_save_enabled:
-                            self.unsaved_links.extend(new_links)
+                        self._queue_db_rows(links=new_links)
                     perf['links_ms'] = (time.perf_counter() - links_start) * 1000
 
                 should_extract = (
@@ -1292,14 +1328,8 @@ class WebCrawler:
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
             # Add to unsaved batch if DB persistence enabled
-            if self.db_save_enabled:
-                self.unsaved_urls.append(result)
-                self._perf_add(**perf)
-                # Trigger batch save if threshold reached
-                if len(self.unsaved_urls) >= self.batch_save_size:
-                    self._save_batch_to_db()
-            else:
-                self._perf_add(**perf)
+            self._perf_add(**perf)
+            self._queue_db_rows(urls=[result])
 
             return result
 
@@ -1416,8 +1446,7 @@ class WebCrawler:
                             ]
 
                     self.user_memory.track_links(new_links)
-                    if self.db_save_enabled:
-                        self.unsaved_links.extend(new_links)
+                    self._queue_db_rows(links=new_links)
 
             # Extract links for further crawling
             should_extract = (
@@ -1433,11 +1462,7 @@ class WebCrawler:
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
             # Add to unsaved batch if DB persistence enabled
-            if self.db_save_enabled:
-                self.unsaved_urls.append(result)
-                # Trigger batch save if threshold reached
-                if len(self.unsaved_urls) >= self.batch_save_size:
-                    self._save_batch_to_db()
+            self._queue_db_rows(urls=[result])
 
             return result
 
@@ -1506,8 +1531,7 @@ class WebCrawler:
                                 if issues_after > issues_before:
                                     new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
                                     self.user_memory.track_issues(new_issues)
-                                    if self.db_save_enabled:
-                                        self.unsaved_issues.extend(new_issues)
+                                    self._queue_db_rows(issues=new_issues)
                         except Exception as e:
                             print(f"Error in async crawl task: {e}")
 

@@ -85,6 +85,34 @@ class CrawlerCheckpointTests(unittest.TestCase):
             else:
                 os.environ['CRAWL_RESULT_STORAGE'] = old_storage
 
+    def test_rows_queued_during_save_are_not_cleared(self):
+        old_storage = os.environ.get('CRAWL_RESULT_STORAGE')
+        crawler = WebCrawler()
+        crawler.crawl_id = 14
+        crawler.db_save_enabled = True
+        crawler.unsaved_urls = [{'url': 'https://example.com/first'}]
+
+        def save_url_batch(_crawl_id, urls):
+            self.assertEqual(urls, [{'url': 'https://example.com/first'}])
+            crawler._queue_db_rows(urls=[{'url': 'https://example.com/late'}])
+
+        try:
+            os.environ['CRAWL_RESULT_STORAGE'] = 'sqlite'
+            with (
+                mock.patch('src.crawl_db.save_url_batch', side_effect=save_url_batch),
+                mock.patch('src.crawl_db.save_links_batch'),
+                mock.patch('src.crawl_db.save_issues_batch'),
+                mock.patch('src.crawl_db.update_crawl_stats'),
+            ):
+                crawler._save_batch_to_db()
+
+            self.assertEqual(crawler.unsaved_urls, [{'url': 'https://example.com/late'}])
+        finally:
+            if old_storage is None:
+                os.environ.pop('CRAWL_RESULT_STORAGE', None)
+            else:
+                os.environ['CRAWL_RESULT_STORAGE'] = old_storage
+
     def test_crawl_stats_are_throttled_unless_forced(self):
         old_storage = os.environ.get('CRAWL_RESULT_STORAGE')
         crawler = WebCrawler()
