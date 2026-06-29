@@ -146,6 +146,66 @@ class CrawlerCheckpointTests(unittest.TestCase):
         self.assertEqual(crawler.stats['crawled'], 1234)
         self.assertEqual(message, 'Resumed crawl from 1234 URLs')
 
+    def test_runtime_env_overrides_resume_config_and_skips_link_load(self):
+        old_env = {
+            key: os.environ.get(key)
+            for key in (
+                'CRAWL_CONCURRENCY',
+                'CRAWL_BATCH_SAVE_SIZE',
+                'CRAWL_PERSIST_LINKS',
+                'CRAWL_ENABLE_DUPLICATION_CHECK',
+            )
+        }
+        crawl_data = {
+            'id': 12,
+            'user_id': 1,
+            'status': 'paused',
+            'base_url': 'https://example.com',
+            'base_domain': 'example.com',
+            'config_snapshot': {
+                **WebCrawler()._get_default_config(),
+                'concurrency': 20,
+                'persist_links': True,
+                'enable_duplication_check': True,
+            },
+            'urls_crawled': 5,
+            'urls_discovered': 10,
+            'max_depth_reached': 1,
+            'resume_checkpoint': {},
+        }
+
+        try:
+            os.environ['CRAWL_CONCURRENCY'] = '50'
+            os.environ['CRAWL_BATCH_SAVE_SIZE'] = '500'
+            os.environ['CRAWL_PERSIST_LINKS'] = 'false'
+            os.environ['CRAWL_ENABLE_DUPLICATION_CHECK'] = 'false'
+
+            crawler = WebCrawler()
+            with (
+                mock.patch('src.crawl_db.get_resume_data', return_value=crawl_data),
+                mock.patch('src.crawl_db.load_crawled_urls', return_value=[]),
+                mock.patch('src.crawl_db.load_crawl_links', return_value=[{'source_url': 'a', 'target_url': 'b'}]) as load_links,
+                mock.patch('src.crawl_db.load_crawl_issues', return_value=[]),
+                mock.patch('src.crawl_db.load_crawl_queue', return_value=[]),
+                mock.patch('src.crawl_db.set_crawl_status', return_value=True),
+                mock.patch.object(WebCrawler, '_start_auto_save_thread'),
+                mock.patch('src.crawler.threading.Thread', side_effect=lambda target: SimpleNamespace(start=lambda: None)),
+            ):
+                success, _message = crawler.resume_from_database(12, user_id=1, session_id='s')
+
+            self.assertTrue(success)
+            self.assertEqual(crawler.config['concurrency'], 50)
+            self.assertEqual(crawler.batch_save_size, 500)
+            self.assertFalse(crawler.config['persist_links'])
+            self.assertFalse(crawler.config['enable_duplication_check'])
+            load_links.assert_not_called()
+        finally:
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
 
 if __name__ == '__main__':
     unittest.main()

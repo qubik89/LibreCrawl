@@ -3,6 +3,7 @@ Main web crawler orchestrator with smooth rate limiting and modular architecture
 Refactored for better code practices and maintainability.
 """
 import requests
+import os
 import socket
 import ssl
 import threading
@@ -73,6 +74,25 @@ from src.core.issue_detector import IssueDetector
 from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
 from src.crawl_storage import result_storage_mode, should_save_sqlite_rows
+
+
+def _env_bool(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_int(name, default, minimum=None, maximum=None):
+    try:
+        value = int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
 
 
 class WebCrawler:
@@ -156,6 +176,8 @@ class WebCrawler:
 
         # Enable nested asyncio for thread compatibility
         nest_asyncio.apply()
+        self._apply_runtime_overrides()
+        self._configure_http_adapter()
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -177,6 +199,7 @@ class WebCrawler:
             'exclude_patterns': [],
             'max_file_size': 50 * 1024 * 1024,
             'concurrency': 20,
+            'persist_links': True,
             'memory_limit': 512 * 1024 * 1024,
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -326,6 +349,9 @@ class WebCrawler:
 
     def _initialize_components(self):
         """Initialize all crawler components"""
+        self._apply_runtime_overrides()
+        self._configure_http_adapter()
+
         # Calculate requests per second from delay
         if self.config['delay'] > 0:
             requests_per_second = 1.0 / self.config['delay']
@@ -474,6 +500,7 @@ class WebCrawler:
             if demo_mode:
                 self.config['demo_mode'] = True
                 self.config['demo_memory_limit_bytes'] = demo_limit
+            self._apply_runtime_overrides()
             self.db_save_enabled = True
 
             # Initialize components
@@ -498,7 +525,7 @@ class WebCrawler:
                     self.link_manager.visited_urls.add(url)
 
             # Load links and restore to link manager
-            loaded_links = load_crawl_links(crawl_id)
+            loaded_links = load_crawl_links(crawl_id) if self.config.get('persist_links', True) else []
             if loaded_links:
                 self.link_manager.all_links = loaded_links
                 # Rebuild links_set for duplicate detection
@@ -768,6 +795,7 @@ class WebCrawler:
     def update_config(self, new_config):
         """Update crawler configuration"""
         self.config.update(new_config)
+        self._apply_runtime_overrides()
 
         # Update session headers
         self.session.headers.update({
@@ -794,6 +822,34 @@ class WebCrawler:
                 self.rate_limiter.update_rate(1.0 / self.config['delay'])
             else:
                 self.rate_limiter.update_rate(100.0)
+
+    def _apply_runtime_overrides(self):
+        self.config['concurrency'] = _env_int(
+            'CRAWL_CONCURRENCY',
+            self.config.get('concurrency', 20),
+            1,
+            100,
+        )
+        self.config['persist_links'] = _env_bool(
+            'CRAWL_PERSIST_LINKS',
+            self.config.get('persist_links', True),
+        )
+        self.config['enable_duplication_check'] = _env_bool(
+            'CRAWL_ENABLE_DUPLICATION_CHECK',
+            self.config.get('enable_duplication_check', True),
+        )
+        self.batch_save_size = _env_int(
+            'CRAWL_BATCH_SAVE_SIZE',
+            self.batch_save_size,
+            1,
+            5000,
+        )
+
+    def _configure_http_adapter(self):
+        pool_size = max(10, int(self.config.get('concurrency', 5)))
+        adapter = requests.adapters.HTTPAdapter(pool_connections=pool_size, pool_maxsize=pool_size)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
     def _crawl_worker(self):
         """Main crawling worker with smooth rate limiting"""
@@ -1045,31 +1101,32 @@ class WebCrawler:
                 self.seo_extractor.extract_hreflang(soup, result)
                 self.seo_extractor.extract_schema_org(soup, result)
 
-                # Collect all links
-                links_before = len(self.link_manager.all_links)
-                self.link_manager.collect_all_links(soup, url, self.url_statuses)
-                links_after = len(self.link_manager.all_links)
+                if self.config.get('persist_links', True):
+                    # Collect all links
+                    links_before = len(self.link_manager.all_links)
+                    self.link_manager.collect_all_links(soup, url, self.url_statuses)
+                    links_after = len(self.link_manager.all_links)
 
-                # Track + batch new links
-                if links_after > links_before:
-                    new_links = self.link_manager.all_links[links_before:links_after]
+                    # Track + batch new links
+                    if links_after > links_before:
+                        new_links = self.link_manager.all_links[links_before:links_after]
 
-                    # HEAD-check image URLs for broken image detection
-                    image_links = [l for l in new_links if l.get('placement') == 'image']
-                    if image_links:
-                        self._check_image_statuses(image_links)
-                        broken = [l for l in image_links
-                                  if l.get('target_status') is not None
-                                  and (l['target_status'] >= 400 or l['target_status'] == 0)]
-                        if broken:
-                            result['broken_images'] = [
-                                {'url': l['target_url'], 'status': l['target_status']}
-                                for l in broken
-                            ]
+                        # HEAD-check image URLs for broken image detection
+                        image_links = [l for l in new_links if l.get('placement') == 'image']
+                        if image_links:
+                            self._check_image_statuses(image_links)
+                            broken = [l for l in image_links
+                                      if l.get('target_status') is not None
+                                      and (l['target_status'] >= 400 or l['target_status'] == 0)]
+                            if broken:
+                                result['broken_images'] = [
+                                    {'url': l['target_url'], 'status': l['target_status']}
+                                    for l in broken
+                                ]
 
-                    self.user_memory.track_links(new_links)
-                    if self.db_save_enabled:
-                        self.unsaved_links.extend(new_links)
+                        self.user_memory.track_links(new_links)
+                        if self.db_save_enabled:
+                            self.unsaved_links.extend(new_links)
 
                 # Extract links for further crawling
                 should_extract = (
@@ -1179,31 +1236,32 @@ class WebCrawler:
             self.seo_extractor.extract_hreflang(soup, result)
             self.seo_extractor.extract_schema_org(soup, result)
 
-            # Collect all links
-            links_before = len(self.link_manager.all_links)
-            self.link_manager.collect_all_links(soup, url, self.url_statuses)
-            links_after = len(self.link_manager.all_links)
+            if self.config.get('persist_links', True):
+                # Collect all links
+                links_before = len(self.link_manager.all_links)
+                self.link_manager.collect_all_links(soup, url, self.url_statuses)
+                links_after = len(self.link_manager.all_links)
 
-            # Track + batch new links
-            if links_after > links_before:
-                new_links = self.link_manager.all_links[links_before:links_after]
+                # Track + batch new links
+                if links_after > links_before:
+                    new_links = self.link_manager.all_links[links_before:links_after]
 
-                # HEAD-check image URLs for broken image detection
-                image_links = [l for l in new_links if l.get('placement') == 'image']
-                if image_links:
-                    self._check_image_statuses(image_links)
-                    broken = [l for l in image_links
-                              if l.get('target_status') is not None
-                              and (l['target_status'] >= 400 or l['target_status'] == 0)]
-                    if broken:
-                        result['broken_images'] = [
-                            {'url': l['target_url'], 'status': l['target_status']}
-                            for l in broken
-                        ]
+                    # HEAD-check image URLs for broken image detection
+                    image_links = [l for l in new_links if l.get('placement') == 'image']
+                    if image_links:
+                        self._check_image_statuses(image_links)
+                        broken = [l for l in image_links
+                                  if l.get('target_status') is not None
+                                  and (l['target_status'] >= 400 or l['target_status'] == 0)]
+                        if broken:
+                            result['broken_images'] = [
+                                {'url': l['target_url'], 'status': l['target_status']}
+                                for l in broken
+                            ]
 
-                self.user_memory.track_links(new_links)
-                if self.db_save_enabled:
-                    self.unsaved_links.extend(new_links)
+                    self.user_memory.track_links(new_links)
+                    if self.db_save_enabled:
+                        self.unsaved_links.extend(new_links)
 
             # Extract links for further crawling
             should_extract = (
