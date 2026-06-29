@@ -14,6 +14,10 @@ import os
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 QUEUE_DIR = os.path.join(os.path.dirname(DB_FILE), 'crawl_queues')
 
+def metadata_postgres_enabled():
+    from src import crawl_metadata_pg
+    return crawl_metadata_pg.enabled()
+
 @contextmanager
 def get_db():
     """Context manager for database connections"""
@@ -30,6 +34,10 @@ def get_db():
 
 def init_crawl_tables():
     """Initialize crawl persistence tables"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        return crawl_metadata_pg.init_tables()
+
     with get_db() as conn:
         cursor = conn.cursor()
 
@@ -196,6 +204,14 @@ def create_crawl(user_id, session_id, base_url, base_domain, config_snapshot):
     Create a new crawl record
     Returns the crawl_id
     """
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.create_crawl(user_id, session_id, base_url, base_domain, config_snapshot)
+        except Exception as e:
+            print(f"Error creating crawl: {e}")
+            return None
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -213,6 +229,14 @@ def create_crawl(user_id, session_id, base_url, base_domain, config_snapshot):
 
 def update_crawl_stats(crawl_id, discovered=None, crawled=None, max_depth=None, peak_memory_mb=None, estimated_size_mb=None):
     """Update crawl statistics"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.update_stats(crawl_id, discovered, crawled, max_depth, peak_memory_mb, estimated_size_mb)
+        except Exception as e:
+            print(f"Error updating crawl stats: {e}")
+            return False
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -393,6 +417,14 @@ def save_issues_batch(crawl_id, issues):
 
 def save_checkpoint(crawl_id, checkpoint_data):
     """Save queue checkpoint for crash recovery"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.save_checkpoint(crawl_id, checkpoint_data)
+        except Exception as e:
+            print(f"Error saving checkpoint: {e}")
+            return False
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -432,6 +464,9 @@ def load_crawl_queue(crawl_id):
         except Exception as e:
             print(f"Error loading crawl queue file: {e}")
 
+    if metadata_postgres_enabled():
+        return []
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -451,6 +486,14 @@ def set_crawl_status(crawl_id, status):
     Update crawl status
     status: 'running', 'paused', 'completed', 'failed', 'stopped', 'archived'
     """
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.set_status(crawl_id, status)
+        except Exception as e:
+            print(f"Error setting crawl status: {e}")
+            return False
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -477,6 +520,14 @@ def set_crawl_status(crawl_id, status):
 
 def get_crawl_by_id(crawl_id):
     """Get crawl metadata by ID"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.get_by_id(crawl_id)
+        except Exception as e:
+            print(f"Error fetching crawl: {e}")
+            return None
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -501,6 +552,10 @@ def get_crawl_by_id(crawl_id):
 
 def get_crawl_counts(crawl_id):
     """Return persisted row counts for a crawl."""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        return crawl_metadata_pg.get_counts(crawl_id)
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -520,6 +575,14 @@ def get_crawl_counts(crawl_id):
 
 def get_user_crawls(user_id, limit=50, offset=0, status_filter=None):
     """Get all crawls for a user"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.get_user_crawls(user_id, limit, offset, status_filter)
+        except Exception as e:
+            print(f"Error fetching user crawls: {e}")
+            return []
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -647,6 +710,14 @@ def get_resume_data(crawl_id):
 
 def delete_crawl(crawl_id):
     """Delete a crawl and all associated data (CASCADE handles related tables)"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.delete_crawl(crawl_id)
+        except Exception as e:
+            print(f"Error deleting crawl: {e}")
+            return False
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -659,6 +730,14 @@ def delete_crawl(crawl_id):
 
 def get_crashed_crawls():
     """Find crawls that were running when server crashed"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.get_crashed_crawls()
+        except Exception as e:
+            print(f"Error finding crashed crawls: {e}")
+            return []
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -681,6 +760,14 @@ def get_crashed_crawls():
 
 def cleanup_old_crawls(days=90):
     """Delete crawls older than specified days (optional maintenance)"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.cleanup_old_crawls(days)
+        except Exception as e:
+            print(f"Error cleaning up old crawls: {e}")
+            return 0
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -700,6 +787,14 @@ def cleanup_old_crawls(days=90):
 
 def get_crawl_count(user_id):
     """Get total number of crawls for a user"""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.get_crawl_count(user_id)
+        except Exception as e:
+            print(f"Error getting crawl count: {e}")
+            return 0
+
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -712,6 +807,9 @@ def get_crawl_count(user_id):
 
 def get_database_size_mb():
     """Get total database size in MB"""
+    if metadata_postgres_enabled():
+        return 0
+
     try:
         import os
         if os.path.exists(DB_FILE):

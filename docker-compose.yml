@@ -4,6 +4,7 @@ services:
     container_name: mitmore-seo-crawl
     depends_on:
       - clickhouse
+      - postgres
     expose:
       - "5000"
     volumes:
@@ -33,6 +34,8 @@ services:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - CLICKHOUSE_SECURE=${CLICKHOUSE_SECURE:-false}
       - CRAWL_RESULT_STORAGE=${CRAWL_RESULT_STORAGE:-clickhouse}
+      # Optional PostgreSQL metadata store. Empty keeps SQLite for auth/settings/crawl metadata.
+      - METADATA_DATABASE_URL=${METADATA_DATABASE_URL:-}
       # Uncomment these for SMTP sending
       # - SMTP_HOST=${SMTP_HOST}
       # - SMTP_PORT=${SMTP_PORT}
@@ -79,6 +82,18 @@ services:
         soft: 262144
         hard: 262144
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: mitmore-seo-crawl-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-mitmore_seo_crawl}
+      - POSTGRES_USER=${POSTGRES_USER:-librecrawl}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-librecrawl}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
 volumes:
   clickhouse_data:
   clickhouse_logs:
+  postgres_data:
