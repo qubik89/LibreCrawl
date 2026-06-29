@@ -12,6 +12,10 @@ from contextlib import contextmanager
 # Database file location - stored in data/ for Docker volume persistence
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 
+def metadata_postgres_enabled():
+    from src import auth_metadata_pg
+    return auth_metadata_pg.enabled()
+
 @contextmanager
 def get_db():
     """Context manager for database connections"""
@@ -28,6 +32,17 @@ def get_db():
 
 def init_db():
     """Initialize the database with users and settings tables"""
+    if metadata_postgres_enabled():
+        from src import auth_metadata_pg
+        auth_metadata_pg.init_tables()
+        from src.crawl_db import init_crawl_tables
+        init_crawl_tables()
+        from src.reporting_settings import init_reporting_tables
+        from src.reporting_jobs import init_report_job_tables
+        init_reporting_tables()
+        init_report_job_tables()
+        return
+
     os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     with get_db() as conn:
         cursor = conn.cursor()
@@ -144,6 +159,10 @@ def create_user(username, email, password):
         # Hash the password
         password_hash = hash_password(password)
 
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.create_user(username, email, password_hash)
+
         # Insert into database
         with get_db() as conn:
             cursor = conn.cursor()
@@ -189,6 +208,13 @@ def authenticate_user(username, password):
     Returns (success, message, user_data)
     """
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.authenticate_user(
+                username,
+                lambda password_hash: verify_password(password, password_hash),
+            )
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -233,6 +259,10 @@ def authenticate_user(username, password):
 def get_user_by_id(user_id):
     """Get user information by ID"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_user_by_id(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -253,6 +283,10 @@ def get_user_by_id(user_id):
 def get_all_users():
     """Get all users (for admin purposes)"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_all_users()
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -271,6 +305,10 @@ def get_all_users():
 def verify_user(user_id):
     """Verify a user account (for admin purposes)"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.verify_user(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE users SET verified = 1 WHERE id = ?', (user_id,))
@@ -283,6 +321,10 @@ def save_user_settings(user_id, settings_dict):
     """Save settings for a user (stores as JSON)"""
     import json
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.save_user_settings(user_id, settings_dict)
+
         settings_json = json.dumps(settings_dict)
         with get_db() as conn:
             cursor = conn.cursor()
@@ -302,6 +344,10 @@ def get_user_settings(user_id):
     """Get settings for a user (returns dict or None)"""
     import json
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_user_settings(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -321,6 +367,10 @@ def get_user_settings(user_id):
 def delete_user_settings(user_id):
     """Delete settings for a user"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.delete_user_settings(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
@@ -336,6 +386,10 @@ def set_user_tier(user_id, tier):
         return False, f"Invalid tier. Must be one of: {', '.join(valid_tiers)}"
 
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.set_user_tier(user_id, tier)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE users SET tier = ? WHERE id = ?', (tier, user_id))
@@ -347,6 +401,10 @@ def set_user_tier(user_id, tier):
 def get_user_tier(user_id):
     """Get tier for a user"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_user_tier(user_id)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT tier FROM users WHERE id = ?', (user_id,))
@@ -470,6 +528,10 @@ def create_verification_token(user_id, app_source='main'):
         # Generate a secure random token
         token = secrets.token_urlsafe(32)
 
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.create_verification_token(user_id, token, app_source)
+
         # Token expires in 24 hours
         expires_at = datetime.now() + timedelta(hours=24)
 
@@ -543,6 +605,10 @@ def verify_token(token):
 def get_user_by_email(email):
     """Get user information by email"""
     try:
+        if metadata_postgres_enabled():
+            from src import auth_metadata_pg
+            return auth_metadata_pg.get_user_by_email(email)
+
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
