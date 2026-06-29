@@ -153,6 +153,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 'CRAWL_CONCURRENCY',
                 'CRAWL_BATCH_SAVE_SIZE',
                 'CRAWL_PERSIST_LINKS',
+                'CRAWL_LINK_PLACEMENTS',
                 'CRAWL_ENABLE_DUPLICATION_CHECK',
             )
         }
@@ -166,6 +167,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 **WebCrawler()._get_default_config(),
                 'concurrency': 20,
                 'persist_links': True,
+                'link_placements': None,
                 'enable_duplication_check': True,
             },
             'urls_crawled': 5,
@@ -178,6 +180,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             os.environ['CRAWL_CONCURRENCY'] = '50'
             os.environ['CRAWL_BATCH_SAVE_SIZE'] = '500'
             os.environ['CRAWL_PERSIST_LINKS'] = 'false'
+            os.environ['CRAWL_LINK_PLACEMENTS'] = 'body,image'
             os.environ['CRAWL_ENABLE_DUPLICATION_CHECK'] = 'false'
 
             crawler = WebCrawler()
@@ -197,6 +200,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             self.assertEqual(crawler.config['concurrency'], 50)
             self.assertEqual(crawler.batch_save_size, 500)
             self.assertFalse(crawler.config['persist_links'])
+            self.assertEqual(crawler.config['link_placements'], ['body', 'image'])
             self.assertFalse(crawler.config['enable_duplication_check'])
             load_links.assert_not_called()
         finally:

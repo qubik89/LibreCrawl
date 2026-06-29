@@ -54,7 +54,7 @@ class LinkManager:
                         self.all_discovered_urls.add(clean_url)
                         self.discovered_urls.append((clean_url, depth))
 
-    def collect_all_links(self, soup, source_url, crawl_results):
+    def collect_all_links(self, soup, source_url, crawl_results, allowed_placements=None):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
         status_lookup = crawl_results if hasattr(crawl_results, 'get') else {
@@ -62,6 +62,7 @@ class LinkManager:
             for result in crawl_results
             if result.get('url')
         }
+        allowed_placements = set(allowed_placements or [])
 
         for link in links:
             href = link['href'].strip()
@@ -94,6 +95,8 @@ class LinkManager:
 
                 # Determine placement (navigation, footer, body)
                 placement = self._detect_link_placement(link)
+                if allowed_placements and placement not in allowed_placements:
+                    continue
 
                 link_data = {
                     'source_url': source_url,
@@ -124,6 +127,9 @@ class LinkManager:
                 continue
 
         # Also collect <img src> as links so broken images are discoverable
+        if allowed_placements and 'image' not in allowed_placements:
+            return
+
         imgs = soup.find_all('img', src=True)
         for img in imgs:
             src = img.get('src', '').strip()

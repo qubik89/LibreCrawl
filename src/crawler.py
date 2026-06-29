@@ -95,6 +95,13 @@ def _env_int(name, default, minimum=None, maximum=None):
     return value
 
 
+def _env_csv(name, default=None):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return [item.strip().lower() for item in value.split(',') if item.strip()]
+
+
 class WebCrawler:
     """
     Main web crawler with smooth rate limiting and comprehensive SEO analysis.
@@ -200,6 +207,7 @@ class WebCrawler:
             'max_file_size': 50 * 1024 * 1024,
             'concurrency': 20,
             'persist_links': True,
+            'link_placements': None,
             'memory_limit': 512 * 1024 * 1024,
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -838,6 +846,10 @@ class WebCrawler:
             'CRAWL_ENABLE_DUPLICATION_CHECK',
             self.config.get('enable_duplication_check', True),
         )
+        self.config['link_placements'] = _env_csv(
+            'CRAWL_LINK_PLACEMENTS',
+            self.config.get('link_placements'),
+        )
         self.batch_save_size = _env_int(
             'CRAWL_BATCH_SAVE_SIZE',
             self.batch_save_size,
@@ -1104,7 +1116,12 @@ class WebCrawler:
                 if self.config.get('persist_links', True):
                     # Collect all links
                     links_before = len(self.link_manager.all_links)
-                    self.link_manager.collect_all_links(soup, url, self.url_statuses)
+                    self.link_manager.collect_all_links(
+                        soup,
+                        url,
+                        self.url_statuses,
+                        allowed_placements=self.config.get('link_placements'),
+                    )
                     links_after = len(self.link_manager.all_links)
 
                     # Track + batch new links
@@ -1239,7 +1256,12 @@ class WebCrawler:
             if self.config.get('persist_links', True):
                 # Collect all links
                 links_before = len(self.link_manager.all_links)
-                self.link_manager.collect_all_links(soup, url, self.url_statuses)
+                self.link_manager.collect_all_links(
+                    soup,
+                    url,
+                    self.url_statuses,
+                    allowed_placements=self.config.get('link_placements'),
+                )
                 links_after = len(self.link_manager.all_links)
 
                 # Track + batch new links
