@@ -37,7 +37,6 @@ const SERVER_PAGE_SIZE = 500;
 const CLIENT_ROW_LIMIT = 2000;
 const URL_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx', 'no_response', 'html', 'css', 'js', 'images'];
 const LINK_SERVER_KINDS = ['internal', 'external', '2xx', '3xx', '4xx', '5xx'];
-let sampleRefreshTimer = null;
 
 // Incremental polling instance
 let incrementalPoller = null;
@@ -208,7 +207,6 @@ function resumeCrawl() {
 function stopCrawl() {
     crawlState.isRunning = false;
     crawlState.isPaused = false;
-    stopSampleRefresh();
 
     // Update UI
     updateCrawlButtons();
@@ -237,7 +235,6 @@ function clearCrawlData() {
     crawlState.baseUrl = null;
     crawlState.currentCrawlId = null;
     resetServerPageState();
-    stopSampleRefresh();
     crawlState.filters.active = null;
     crawlState.pendingLinks = null;
     crawlState.pendingIssues = null;
@@ -304,7 +301,6 @@ function startPythonCrawl(url) {
             // Refresh user info to update crawl count
             loadUserInfo();
             loadActiveTabPage(true);
-            startSampleRefresh();
             // Start polling for updates
             pollCrawlProgress();
         } else {
@@ -355,7 +351,6 @@ async function pollCrawlProgress() {
 
         if (data.status === 'demo_stopped' || data.demo_stopped) {
             crawlState.isRunning = false;
-            stopSampleRefresh();
             updateCrawlButtons();
             updateStatus('Demo limit reached — crawl data saved');
             showDemoLimitNotification();
@@ -363,7 +358,6 @@ async function pollCrawlProgress() {
             setTimeout(pollCrawlProgress, 1000);
         } else if (data.status === 'completed') {
             crawlState.isRunning = false;
-            stopSampleRefresh();
             updateCrawlButtons();
             hideProgress();
             updateStatus('Crawl completed');
@@ -377,7 +371,6 @@ async function pollCrawlProgress() {
             }
         } else if (data.status === 'failed' || data.status === 'stopped') {
             crawlState.isRunning = false;
-            stopSampleRefresh();
             updateCrawlButtons();
             hideProgress();
             updateStatus(data.status === 'failed' ? 'Crawl failed' : 'Crawl stopped');
@@ -578,7 +571,6 @@ async function attachToServerCrawl(crawlId) {
     if (crawlState.isRunning) showProgress();
     updateCrawlData(data);
     loadActiveTabPage(true);
-    if (crawlState.isRunning) startSampleRefresh();
     updateCrawlButtons();
     updateStatus(crawlState.isRunning ? 'Attached to running crawl' : `Loaded crawl: ${data.stats?.crawled || 0} URLs`);
 
@@ -710,91 +702,6 @@ function updateMemoryDisplay(memoryData, memoryDataSizes) {
     // System available
     const availableMB = memoryData.system?.available_mb || 0;
     document.getElementById('memAvailable').textContent = availableMB.toFixed(0) + ' MB';
-}
-
-function startSampleRefresh() {
-    if (!crawlState.currentCrawlId) return;
-    stopSampleRefresh(false);
-    refreshLiveSamples();
-    sampleRefreshTimer = setInterval(refreshLiveSamples, 5000);
-}
-
-function stopSampleRefresh(hidePanel = true) {
-    if (sampleRefreshTimer) {
-        clearInterval(sampleRefreshTimer);
-        sampleRefreshTimer = null;
-    }
-    if (hidePanel) {
-        const panel = document.getElementById('liveSamplePanel');
-        if (panel) panel.style.display = 'none';
-    }
-}
-
-async function refreshLiveSamples() {
-    const crawlId = crawlState.currentCrawlId;
-    if (!crawlId || !crawlState.isRunning) return;
-
-    try {
-        const response = await fetch(`/api/crawls/${crawlId}/samples?limit=10`);
-        const data = await response.json();
-        if (!data.success) throw new Error(data.error || 'Failed to load samples');
-
-        const panel = document.getElementById('liveSamplePanel');
-        const meta = document.getElementById('liveSampleMeta');
-        if (!panel || !meta) return;
-
-        const analytics = data.analytics || crawlState.analytics || {};
-        const stats = data.stats || crawlState.stats || {};
-        const counts = analytics.counts || {};
-        const totalUrls = counts.urls ?? stats.crawled ?? 0;
-        const totalIssues = counts.issues ?? Object.values(analytics.issue_type_counts || {}).reduce((sum, count) => sum + count, 0);
-        meta.textContent = `Latest sample from ${totalUrls} URLs and ${totalIssues} issues`;
-
-        renderSampleRows('liveSampleUrls', sampleRows(data.recent_urls), row => {
-            const status = row.status_code ? ` ${row.status_code}` : '';
-            return `${row.url || ''}${status}`;
-        }, 'No URL samples yet');
-        renderSampleRows('liveSampleIssues', sampleRows(data.recent_issues), row => {
-            return `${row.type || 'issue'}: ${row.issue || row.category || ''} ${row.url || ''}`;
-        }, 'No issue samples yet');
-
-        panel.style.display = 'block';
-    } catch (error) {
-        console.error('Error refreshing live samples:', error);
-    }
-}
-
-function sampleRows(value) {
-    return (Array.isArray(value) ? value : value?.rows || []).slice(-10);
-}
-
-function renderSampleRows(containerId, rows, formatter, emptyText) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    container.innerHTML = '';
-    const title = document.createElement('strong');
-    title.textContent = containerId === 'liveSampleUrls' ? 'Sample URLs' : 'Sample issues';
-    container.appendChild(title);
-
-    if (!rows.length) {
-        const empty = document.createElement('div');
-        empty.textContent = emptyText;
-        empty.style.opacity = '0.7';
-        container.appendChild(empty);
-        return;
-    }
-
-    rows.forEach(row => {
-        const item = document.createElement('div');
-        item.textContent = truncateText(formatter(row), 140);
-        container.appendChild(item);
-    });
-}
-
-function truncateText(text, maxLength) {
-    text = String(text || '');
-    return text.length > maxLength ? text.slice(0, maxLength - 3) + '...' : text;
 }
 
 function updateCrawlButtons() {
