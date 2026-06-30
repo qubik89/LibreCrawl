@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mitmore SEO Crawl - Memory Debug</title>
+    <title>Mitmore SEO Crawl - Depuración de memoria</title>
     <style>
         * {
             margin: 0;
@@ -249,28 +249,28 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🧠 Memory Debug Dashboard</h1>
-            <p>Real-time memory monitoring for all crawler instances</p>
+            <h1>🧠 Panel de depuración de memoria</h1>
+            <p>Monitorización de memoria en tiempo real para todas las instancias del rastreador</p>
             <div class="refresh-info">
                 <div class="refresh-dot"></div>
-                <span style="font-size: 13px;">Auto-refreshing every 2 seconds</span>
+                <span style="font-size: 13px;">Actualización automática cada 2 segundos</span>
                 <span id="lastUpdate" style="margin-left: auto; font-size: 12px; color: #94a3b8;"></span>
             </div>
         </div>
 
         <div class="summary-cards">
             <div class="summary-card">
-                <h3>Active Instances</h3>
+                <h3>Instancias activas</h3>
                 <div class="value" id="totalInstances">0</div>
-                <div class="label">Crawler sessions running</div>
+                <div class="label">Sesiones de rastreo en ejecución</div>
             </div>
             <div class="summary-card">
-                <h3>Total Memory Used</h3>
+                <h3>Memoria total usada</h3>
                 <div class="value" id="totalMemory">0 MB</div>
-                <div class="label">Across all instances</div>
+                <div class="label">En todas las instancias</div>
             </div>
             <div class="summary-card">
-                <h3>System Memory</h3>
+                <h3>Memoria del sistema</h3>
                 <div class="value" id="systemUsed">0%</div>
                 <div class="label" id="systemDetails">0 / 0 MB used</div>
             </div>
@@ -311,7 +311,7 @@
                 if (systemMem) {
                     document.getElementById('systemUsed').textContent = systemMem.percent.toFixed(1) + '%';
                     document.getElementById('systemDetails').textContent =
-                        `${systemMem.used_mb.toFixed(0)} / ${systemMem.total_mb.toFixed(0)} MB used`;
+                        `${systemMem.used_mb.toFixed(0)} / ${systemMem.total_mb.toFixed(0)} MB usados`;
                 }
 
                 // Render instances
@@ -342,53 +342,53 @@
                 return `
                     <div class="instance-card">
                         <div class="instance-header">
-                            <div class="instance-id">Session: ${instance.session_id}</div>
-                            <div class="instance-badge">ACTIVE</div>
+                            <div class="instance-id">Sesión: ${instance.session_id}</div>
+                            <div class="instance-badge">ACTIVA</div>
                         </div>
 
                         <div class="metrics-grid">
                             <div class="metric">
-                                <div class="metric-label">Process Memory</div>
+                                <div class="metric-label">Memoria del proceso</div>
                                 <div class="metric-value">${currentMB.toFixed(1)} MB</div>
-                                <div class="metric-subtext">+${deltaMB.toFixed(1)} MB from start</div>
+                                <div class="metric-subtext">+${deltaMB.toFixed(1)} MB desde el inicio</div>
                             </div>
                             <div class="metric">
-                                <div class="metric-label">Crawl Data</div>
+                                <div class="metric-label">Datos del rastreo</div>
                                 <div class="metric-value">${dataMB.toFixed(1)} MB</div>
-                                <div class="metric-subtext">${kbPerUrl.toFixed(1)} KB per URL</div>
+                                <div class="metric-subtext">${kbPerUrl.toFixed(1)} KB por URL</div>
                             </div>
                             <div class="metric">
-                                <div class="metric-label">URLs Crawled</div>
+                                <div class="metric-label">URLs rastreadas</div>
                                 <div class="metric-value">${instance.urls_crawled.toLocaleString()}</div>
                             </div>
                             <div class="metric">
-                                <div class="metric-label">Python Overhead</div>
+                                <div class="metric-label">Sobrecarga de Python</div>
                                 <div class="metric-value">${(currentMB - dataMB).toFixed(1)} MB</div>
-                                <div class="metric-subtext">Runtime + libraries</div>
+                                <div class="metric-subtext">Runtime + librerías</div>
                             </div>
                         </div>
 
                         <div class="estimates-section">
-                            <div class="estimates-title">📊 Projection for Large Crawls (Data Only)</div>
+                            <div class="estimates-title">📊 Proyección para rastreos grandes (solo datos)</div>
                             <div class="estimate-row">
-                                <span class="estimate-label">1 Million URLs</span>
+                                <span class="estimate-label">1 millón de URLs</span>
                                 <span class="estimate-value highlight-value">${est1M.toFixed(1)} GB</span>
                             </div>
                             <div class="estimate-row">
-                                <span class="estimate-label">5 Million URLs</span>
+                                <span class="estimate-label">5 millones de URLs</span>
                                 <span class="estimate-value ${est5M > 50 ? 'warning-value' : 'highlight-value'}">
                                     ${est5M.toFixed(1)} GB
                                 </span>
                             </div>
                             <div class="estimate-row">
-                                <span class="estimate-label">10 Million URLs</span>
+                                <span class="estimate-label">10 millones de URLs</span>
                                 <span class="estimate-value ${est10M > 100 ? 'error-value' : 'warning-value'}">
                                     ${est10M.toFixed(1)} GB
                                 </span>
                             </div>
                             <div class="estimate-row">
-                                <span class="estimate-label">+ Python Runtime (~200 MB)</span>
-                                <span class="estimate-value">${(est10M + 0.2).toFixed(1)} GB total</span>
+                                <span class="estimate-label">+ Runtime de Python (~200 MB)</span>
+                                <span class="estimate-value">${(est10M + 0.2).toFixed(1)} GB en total</span>
                             </div>
                         </div>
                     </div>
@@ -404,8 +404,8 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                     </svg>
-                    <h3>No Active Crawler Instances</h3>
-                    <p>Start a crawl to see memory statistics here</p>
+                    <h3>No hay instancias activas del rastreador</h3>
+                    <p>Inicia un rastreo para ver aquí las estadísticas de memoria</p>
                 </div>
             `;
         }
@@ -418,7 +418,7 @@
         function updateLastRefresh() {
             const now = new Date();
             document.getElementById('lastUpdate').textContent =
-                `Last updated: ${now.toLocaleTimeString()}`;
+                `Última actualización: ${now.toLocaleTimeString()}`;
         }
 
         // Initial fetch

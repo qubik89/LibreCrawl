@@ -128,7 +128,7 @@ def skip_auth_login(username):
         session['tier'] = 'admin'
         session.permanent = True
 
-        return True, 'Logged in (authentication skipped)'
+        return True, 'Sesión iniciada (autenticación omitida)'
     except Exception as e:
         print(f"Error in skip_auth_login: {e}")
         return False, f'Login error: {str(e)}'
@@ -192,12 +192,12 @@ def login_required(f):
         elif session.get('user_id') is not None and get_user_by_id(session.get('user_id')) is None:
             session.clear()
             if request.path.startswith('/api/'):
-                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+                return jsonify({'success': False, 'error': 'Autenticación requerida'}), 401
             return redirect(url_for('login_page'))
         elif 'user_id' not in session:
             # Not in local mode and not logged in
             if request.path.startswith('/api/'):
-                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+                return jsonify({'success': False, 'error': 'Autenticación requerida'}), 401
             return redirect(url_for('login_page'))
         return f(*args, **kwargs)
     return decorated_function
@@ -423,7 +423,7 @@ def normalize_report_tone(tone):
 def normalize_report_model(model):
     model = str(model or '').strip()
     if not model or len(model) > 200 or any(ch.isspace() for ch in model):
-        raise ValueError('Invalid report model')
+        raise ValueError('Modelo de informe no válido')
     if not model.startswith(REPORT_MODEL_PREFIXES):
         raise ValueError('Unsupported report model provider')
     return model
@@ -435,7 +435,7 @@ def current_user_can_use_reports():
 
 
 def report_feature_forbidden():
-    return jsonify({'success': False, 'error': 'Reports require an admin account'}), 403
+    return jsonify({'success': False, 'error': 'Los informes requieren una cuenta administradora'}), 403
 
 
 def combine_report_usage(*usage_items):
@@ -834,7 +834,7 @@ def verify_email():
     if not token:
         return render_template('verification_result.html',
                              success=False,
-                             message='Invalid verification link',
+                             message='Enlace de verificación no válido',
                              app_source='main')
 
     # Verify the token
@@ -867,7 +867,7 @@ def verify_email():
 def register():
     # Check if registration is disabled
     if DISABLE_REGISTER:
-        return jsonify({'success': False, 'message': 'Registration is currently disabled'})
+        return jsonify({'success': False, 'message': 'El registro está desactivado'})
 
     data = request.get_json()
     username = data.get('username')
@@ -883,7 +883,7 @@ def register():
             if user_id:
                 verify_user(user_id)
                 set_user_tier(user_id, 'admin')
-                message = 'Account created and verified! You have admin access in local mode.'
+                message = 'Cuenta creada y verificada. Tienes acceso de administrador en modo local.'
         except Exception as e:
             print(f"Error during local mode auto-verification: {e}")
             # Don't fail the registration, just log the error
@@ -901,17 +901,17 @@ def register():
                 )
                 if email_success:
                     if is_resend:
-                        message = 'A verification email was already sent to this address. We\'ve updated your account details and sent a new verification link.'
+                        message = 'Ya se había enviado un correo de verificación a esta dirección. Hemos actualizado los datos de tu cuenta y enviado un nuevo enlace de verificación.'
                     else:
-                        message = 'Registration successful! Please check your email to verify your account.'
+                        message = 'Registro completado. Revisa tu correo para verificar la cuenta.'
                 else:
-                    message = 'Account created, but we could not send the verification email. Please contact support.'
+                    message = 'Cuenta creada, pero no pudimos enviar el correo de verificación. Contacta con soporte.'
                     print(f"Email error: {email_message}")
             else:
-                message = 'Account created, but verification token generation failed. Please contact support.'
+                message = 'Cuenta creada, pero falló la generación del token de verificación. Contacta con soporte.'
         except Exception as e:
             print(f"Error sending verification email: {e}")
-            message = 'Account created, but we could not send the verification email. Please contact support.'
+            message = 'Cuenta creada, pero no pudimos enviar el correo de verificación. Contacta con soporte.'
 
     return jsonify({'success': success, 'message': message})
 
@@ -925,9 +925,9 @@ def login():
     # Username is only used to separate per-user sessions.
     if SKIP_AUTH:
         if not username:
-            return jsonify({'success': False, 'message': 'Username required'})
+            return jsonify({'success': False, 'message': 'Usuario requerido'})
         if len(username) > 50:
-            return jsonify({'success': False, 'message': 'Username must be 50 characters or less'})
+            return jsonify({'success': False, 'message': 'El usuario debe tener 50 caracteres o menos'})
         success, message = skip_auth_login(username)
         return jsonify({'success': success, 'message': message})
 
@@ -946,7 +946,7 @@ def login():
 def guest_login():
     """Login as a guest user (no account required, limited to 3 crawls/24h)"""
     if DISABLE_GUEST:
-        return jsonify({'success': False, 'message': 'Guest login is disabled'})
+        return jsonify({'success': False, 'message': 'El acceso como invitado está desactivado'})
 
     # Create a guest session with no user_id but with tier='guest'
     # In local mode, guests also get admin tier
@@ -955,13 +955,13 @@ def guest_login():
     session['tier'] = 'admin' if LOCAL_MODE else 'guest'
     session.permanent = False  # Don't persist guest sessions
 
-    return jsonify({'success': True, 'message': 'Logged in as guest'})
+    return jsonify({'success': True, 'message': 'Sesión iniciada como invitado'})
 
 @app.route('/api/logout', methods=['POST'])
 @login_required
 def logout():
     session.clear()
-    return jsonify({'success': True, 'message': 'Logged out successfully'})
+    return jsonify({'success': True, 'message': 'Sesión cerrada correctamente'})
 
 @app.route('/api/user/info')
 @login_required
@@ -1085,7 +1085,7 @@ def refresh_report_models():
         settings = get_reporting_settings()
         api_key = _first_nonblank(payload.get('openrouter_api_key'), settings.get('openrouter_api_key'))
         if not api_key:
-            return jsonify({'success': False, 'error': 'OpenRouter API key is required'}), 400
+            return jsonify({'success': False, 'error': 'Se requiere la clave API de OpenRouter'}), 400
         return jsonify({'success': True, 'models': refresh_models(api_key)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1106,18 +1106,18 @@ def create_crawl_report(crawl_id):
         session_id = ensure_session_id()
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
         if crawl.get('status') != 'completed':
-            return jsonify({'success': False, 'error': 'Reports can only be generated for completed crawls'}), 400
+            return jsonify({'success': False, 'error': 'Los informes solo pueden generarse para rastreos completados'}), 400
 
         payload = request_json_object()
         options = resolve_report_request_options(payload, get_reporting_settings())
         if not options.get('model'):
-            return jsonify({'success': False, 'error': 'Report model is required'}), 400
+            return jsonify({'success': False, 'error': 'Se requiere un modelo de informe'}), 400
         if not options.get('openrouter_api_key'):
-            return jsonify({'success': False, 'error': 'OpenRouter API key is required'}), 400
+            return jsonify({'success': False, 'error': 'Se requiere la clave API de OpenRouter'}), 400
 
         report_id = create_report_job(
             crawl_id,
@@ -1151,11 +1151,11 @@ def get_report_status(report_id):
             ensure_session_id(),
         )
         if not job:
-            return jsonify({'success': False, 'error': 'Report not found'}), 404
+            return jsonify({'success': False, 'error': 'Informe no encontrado'}), 404
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not allowed:
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
         return jsonify({'success': True, 'report': public_report_job(job)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1174,14 +1174,14 @@ def download_report(report_id):
             ensure_session_id(),
         )
         if not job:
-            return jsonify({'success': False, 'error': 'Report not found'}), 404
+            return jsonify({'success': False, 'error': 'Informe no encontrado'}), 404
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not allowed:
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
         pdf_path = safe_report_pdf_path(job)
         if job.get('status') != 'completed' or not pdf_path or not os.path.exists(pdf_path):
-            return jsonify({'success': False, 'error': 'Report PDF is not ready'}), 404
+            return jsonify({'success': False, 'error': 'El PDF del informe aún no está listo'}), 404
         return send_file(
             pdf_path,
             mimetype='application/pdf',
@@ -1200,7 +1200,7 @@ def start_crawl():
     url = data.get('url')
 
     if not url:
-        return jsonify({'success': False, 'error': 'URL is required'})
+        return jsonify({'success': False, 'error': 'Se requiere una URL'})
 
     user_id = session.get('user_id')
     session_id = ensure_session_id()
@@ -1252,7 +1252,7 @@ def start_crawl():
 def stop_crawl():
     crawl_id = session.get('current_crawl_id')
     if not crawl_id:
-        return jsonify({'success': False, 'error': 'No crawl selected'})
+        return jsonify({'success': False, 'error': 'No hay ningún rastreo seleccionado'})
     return stop_crawl_by_id(crawl_id)
 
 @app.route('/api/crawl_status')
@@ -1266,9 +1266,9 @@ def crawl_status():
     from src.crawl_db import get_crawl_by_id
     crawl = get_crawl_by_id(crawl_id)
     if not crawl:
-        return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
     if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
-        return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
     payload = build_crawl_summary(crawl_id)
 
@@ -1495,7 +1495,7 @@ def update_crawler_settings():
         # Get current settings and update crawler configuration
         crawler_config = settings_manager.get_crawler_config()
         crawler.update_config(crawler_config)
-        return jsonify({'success': True, 'message': 'Crawler settings updated'})
+        return jsonify({'success': True, 'message': 'Ajustes del rastreador actualizados'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1504,7 +1504,7 @@ def update_crawler_settings():
 def pause_crawl():
     crawl_id = session.get('current_crawl_id')
     if not crawl_id:
-        return jsonify({'success': False, 'error': 'No crawl selected'})
+        return jsonify({'success': False, 'error': 'No hay ningún rastreo seleccionado'})
     return pause_crawl_by_id(crawl_id)
 
 @app.route('/api/resume_crawl', methods=['POST'])
@@ -1512,7 +1512,7 @@ def pause_crawl():
 def resume_crawl():
     crawl_id = session.get('current_crawl_id')
     if not crawl_id:
-        return jsonify({'success': False, 'error': 'No crawl selected'})
+        return jsonify({'success': False, 'error': 'No hay ningún rastreo seleccionado'})
     return resume_crawl_endpoint(crawl_id)
 
 @app.route('/api/crawls/<int:crawl_id>/status')
@@ -1527,9 +1527,9 @@ def crawl_status_by_id(crawl_id):
         crawl = get_crawl_by_id(crawl_id)
 
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         summary = build_crawl_summary(crawl_id)
         return jsonify(summary)
@@ -1568,9 +1568,9 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
         user_id = session.get('user_id')
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
@@ -1625,9 +1625,9 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
         user_id = session.get('user_id')
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
@@ -1682,9 +1682,9 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
         user_id = session.get('user_id')
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         limit = _page_limit(limit if limit is not None else request.args.get('limit', 500, type=int))
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
@@ -1751,9 +1751,9 @@ def crawl_samples_by_id(crawl_id):
         user_id = session.get('user_id')
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         limit = _page_limit(request.args.get('limit', 20, type=int), default=20, maximum=100)
         summary = build_crawl_summary(crawl_id) or {}
@@ -1779,10 +1779,10 @@ def pause_crawl_by_id(crawl_id):
 
         crawl = get_crawl_by_id(crawl_id)
         if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
         active = crawl_jobs.get(crawl_id)
         if not active:
-            return jsonify({'success': False, 'error': 'Crawl is not active'}), 404
+            return jsonify({'success': False, 'error': 'El rastreo no está activo'}), 404
         success, message = active.pause_crawl()
         session['current_crawl_id'] = crawl_id
         return jsonify({'success': success, 'message': message})
@@ -1798,10 +1798,10 @@ def stop_crawl_by_id(crawl_id):
 
         crawl = get_crawl_by_id(crawl_id)
         if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
         active = crawl_jobs.get(crawl_id)
         if not active:
-            return jsonify({'success': False, 'error': 'Crawl is not active'}), 404
+            return jsonify({'success': False, 'error': 'El rastreo no está activo'}), 404
         success, message = active.stop_crawl()
         crawl_jobs.unregister(crawl_id)
         session['current_crawl_id'] = crawl_id
@@ -1846,10 +1846,10 @@ def get_crawl(crawl_id):
         # Get crawl metadata
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
 
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         # Load all data
         urls = load_crawled_urls(crawl_id)
@@ -1880,17 +1880,17 @@ def load_crawl_into_session(crawl_id):
         # Get crawl metadata
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
 
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         counts = build_crawl_summary(crawl_id)['counts']
         session['current_crawl_id'] = crawl_id
 
         return jsonify({
             'success': True,
-            'message': f'Attached to crawl {crawl_id}',
+            'message': f'Adjuntado al rastreo {crawl_id}',
             'crawl_id': crawl_id,
             'urls_count': counts['urls'],
             'links_count': counts['links'],
@@ -1914,16 +1914,16 @@ def resume_crawl_endpoint(crawl_id):
 
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         active = crawl_jobs.get(crawl_id)
         if active:
             if active.is_paused:
                 success, message = active.resume_crawl()
             elif active.is_running:
-                success, message = True, 'Crawl already running'
+                success, message = True, 'El rastreo ya está en curso'
             else:
                 crawl_jobs.unregister(crawl_id)
                 active = None
@@ -1963,10 +1963,10 @@ def delete_crawl_endpoint(crawl_id):
         # Verify ownership
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
 
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         active = crawl_jobs.get(crawl_id)
         if active:
@@ -1974,7 +1974,7 @@ def delete_crawl_endpoint(crawl_id):
             crawl_jobs.unregister(crawl_id)
 
         success = delete_crawl(crawl_id)
-        return jsonify({'success': success, 'message': 'Crawl deleted successfully' if success else 'Failed to delete crawl'})
+        return jsonify({'success': success, 'message': 'Rastreo eliminado correctamente' if success else 'No se pudo eliminar el rastreo'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1990,13 +1990,13 @@ def archive_crawl(crawl_id):
         # Verify ownership
         crawl = get_crawl_by_id(crawl_id)
         if not crawl:
-            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
 
         if not user_can_access_crawl(crawl, user_id, session_id):
-            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
         success = set_crawl_status(crawl_id, 'archived')
-        return jsonify({'success': success, 'message': 'Crawl archived successfully' if success else 'Failed to archive crawl'})
+        return jsonify({'success': success, 'message': 'Rastreo archivado correctamente' if success else 'No se pudo archivar el rastreo'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -2033,9 +2033,9 @@ def export_data():
             from src.crawl_db import get_crawl_by_id, load_crawled_urls, load_crawl_links, load_crawl_issues
             crawl = get_crawl_by_id(crawl_id)
             if not crawl:
-                return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+                return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
             if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
-                return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+                return jsonify({'success': False, 'error': 'No autorizado'}), 403
             urls = load_crawled_urls(crawl_id)
             links = load_crawl_links(crawl_id)
             issues = load_crawl_issues(crawl_id)
@@ -2052,7 +2052,7 @@ def export_data():
             issues = crawl_data.get('issues', [])
 
         if not urls:
-            return jsonify({'success': False, 'error': 'No data to export'})
+            return jsonify({'success': False, 'error': 'No hay datos para exportar'})
 
         # Update link statuses from crawled URLs (fixes missing status codes in exports)
         if links and urls:
@@ -2137,7 +2137,7 @@ def export_data():
                 regular_mimetype = 'application/xml'
                 regular_filename = f'mitmore_seo_crawl_export_{int(time.time())}.xml'
             else:
-                return jsonify({'success': False, 'error': 'Unsupported export format'})
+                return jsonify({'success': False, 'error': 'Formato de exportación no admitido'})
 
             files_to_export.append({
                 'content': regular_content,
@@ -2148,11 +2148,11 @@ def export_data():
         # Handle special case where only special fields are selected but no data
         if not files_to_export:
             if has_issues_export and not issues:
-                return jsonify({'success': False, 'error': 'No issues data to export'})
+                return jsonify({'success': False, 'error': 'No hay datos de incidencias para exportar'})
             elif has_links_export and not links:
-                return jsonify({'success': False, 'error': 'No links data to export'})
+                return jsonify({'success': False, 'error': 'No hay datos de enlaces para exportar'})
             else:
-                return jsonify({'success': False, 'error': 'No data to export'})
+                return jsonify({'success': False, 'error': 'No hay datos para exportar'})
 
         # Return multiple files if we have more than one, otherwise single file
         if len(files_to_export) > 1:

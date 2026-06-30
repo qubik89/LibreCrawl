@@ -322,7 +322,7 @@ function setupSettingsEventHandlers() {
 function resetIssueExclusions() {
     // Always use the hardcoded defaults, not current settings
     document.getElementById('issueExclusionPatterns').value = defaultSettings.issueExclusionPatterns;
-    alert('Issue exclusion patterns have been reset to defaults');
+    alert('Los patrones de exclusión de incidencias se han restablecido por defecto');
 }
 
 async function openSettings() {
@@ -341,7 +341,7 @@ async function openSettings() {
 
     // Block guests from accessing settings
     if (userTier === 'guest') {
-        alert('Settings are not available for guest users.\n\nPlease register for a free account to customize crawler settings, filters, and more.\n\nClick "Logout" and then "Register here" to create an account.');
+        alert('Los ajustes no están disponibles para usuarios invitados.\n\nRegístrate gratis para personalizar ajustes del rastreador, filtros y más.\n\nHaz clic en "Cerrar sesión" y luego en "Regístrate aquí" para crear una cuenta.');
         return;
     }
 
@@ -407,9 +407,9 @@ function applyTierRestrictions(tier) {
             const message = document.createElement('div');
             message.style.cssText = 'padding: 40px; text-align: center; color: #9ca3af; font-size: 16px;';
             message.innerHTML = `
-                <h3 style="color: #f3f4f6; margin-bottom: 16px;">Settings Access Restricted</h3>
-                <p>Guest accounts cannot modify settings.</p>
-                <p style="margin-top: 8px; font-size: 14px;">Please upgrade your account to access settings.</p>
+                <h3 style="color: #f3f4f6; margin-bottom: 16px;">Acceso a ajustes restringido</h3>
+                <p>Las cuentas de invitado no pueden modificar ajustes.</p>
+                <p style="margin-top: 8px; font-size: 14px;">Mejora tu cuenta para acceder a los ajustes.</p>
             `;
             settingsContent.innerHTML = '';
             settingsContent.appendChild(message);
@@ -518,7 +518,7 @@ async function saveSettings() {
     // Validate settings
     const validation = validateSettings(newSettings);
     if (!validation.valid) {
-        alert('Settings validation failed: ' + validation.errors.join(', '));
+        alert('La validación de ajustes ha fallado: ' + validation.errors.join(', '));
         return;
     }
 
@@ -528,7 +528,7 @@ async function saveSettings() {
         console.log('Settings saved to localStorage');
     } catch (error) {
         console.error('Failed to save to localStorage:', error);
-        showNotification('Warning: Settings may not persist', 'warning');
+        showNotification('Aviso: puede que los ajustes no se conserven', 'warning');
     }
 
     // Update current settings
@@ -541,7 +541,7 @@ async function saveSettings() {
 
     // Close settings modal
     closeSettings();
-    showNotification(reportSaveOk ? 'Settings saved successfully' : 'Crawler settings saved; report settings failed', reportSaveOk ? 'success' : 'warning');
+    showNotification(reportSaveOk ? 'Ajustes guardados correctamente' : 'Ajustes del rastreador guardados; los ajustes de informes han fallado', reportSaveOk ? 'success' : 'warning');
 
     // Sync to backend for crawler configuration
     fetch('/api/save_settings', {
@@ -568,7 +568,7 @@ async function saveSettings() {
 }
 
 function resetSettings() {
-    if (confirm('Are you sure you want to reset all settings to their default values?')) {
+    if (confirm('¿Seguro que quieres restablecer todos los ajustes a sus valores por defecto?')) {
         currentSettings = { ...defaultSettings };
 
         // Clear localStorage
@@ -581,7 +581,7 @@ function resetSettings() {
 
         populateSettingsForm();
         applyCustomCSS(); // Remove any custom CSS
-        showNotification('Settings reset to defaults', 'info');
+        showNotification('Ajustes restablecidos por defecto', 'info');
 
         // Sync reset to backend
         syncSettingsToBackend();
@@ -593,66 +593,66 @@ function validateSettings(settings) {
 
     // Validate numeric ranges
     if (settings.maxDepth < 1 || settings.maxDepth > 10) {
-        errors.push('Max depth must be between 1 and 10');
+        errors.push('La profundidad máxima debe estar entre 1 y 10');
     }
 
     if (settings.maxUrls < 1 || settings.maxUrls > 5000000) {
-        errors.push('Max URLs must be between 1 and 5,000,000');
+        errors.push('El máximo de URLs debe estar entre 1 y 5.000.000');
     }
 
     if (settings.crawlDelay < 0 || settings.crawlDelay > 60) {
-        errors.push('Crawl delay must be between 0 and 60 seconds');
+        errors.push('La pausa de rastreo debe estar entre 0 y 60 segundos');
     }
 
     if (settings.timeout < 1 || settings.timeout > 120) {
-        errors.push('Timeout must be between 1 and 120 seconds');
+        errors.push('El tiempo de espera debe estar entre 1 y 120 segundos');
     }
 
     if (settings.retries < 0 || settings.retries > 10) {
-        errors.push('Retries must be between 0 and 10');
+        errors.push('Los reintentos deben estar entre 0 y 10');
     }
 
     if (settings.maxFileSize < 1 || settings.maxFileSize > 1000) {
-        errors.push('Max file size must be between 1 and 1000 MB');
+        errors.push('El tamaño máximo de archivo debe estar entre 1 y 1000 MB');
     }
 
     if (settings.concurrency < 1 || settings.concurrency > 50) {
-        errors.push('Concurrency must be between 1 and 50');
+        errors.push('La concurrencia debe estar entre 1 y 50');
     }
 
     if (settings.memoryLimit < 64 || settings.memoryLimit > 4096) {
-        errors.push('Memory limit must be between 64 and 4096 MB');
+        errors.push('El límite de memoria debe estar entre 64 y 4096 MB');
     }
 
     // Validate duplication detection settings
     if (settings.duplicationThreshold < 0 || settings.duplicationThreshold > 1) {
-        errors.push('Duplication threshold must be between 0.0 and 1.0');
+        errors.push('El umbral de duplicación debe estar entre 0,0 y 1,0');
     }
 
     // Validate JavaScript settings if enabled
     if (settings.enableJavaScript) {
         if (settings.jsWaitTime < 0 || settings.jsWaitTime > 30) {
-            errors.push('JavaScript wait time must be between 0 and 30 seconds');
+            errors.push('La espera de JavaScript debe estar entre 0 y 30 segundos');
         }
 
         if (settings.jsTimeout < 5 || settings.jsTimeout > 120) {
-            errors.push('JavaScript timeout must be between 5 and 120 seconds');
+            errors.push('El tiempo de espera de JavaScript debe estar entre 5 y 120 segundos');
         }
 
         if (settings.jsViewportWidth < 800 || settings.jsViewportWidth > 4000) {
-            errors.push('JavaScript viewport width must be between 800 and 4000 pixels');
+            errors.push('El ancho del viewport de JavaScript debe estar entre 800 y 4000 píxeles');
         }
 
         if (settings.jsViewportHeight < 600 || settings.jsViewportHeight > 3000) {
-            errors.push('JavaScript viewport height must be between 600 and 3000 pixels');
+            errors.push('El alto del viewport de JavaScript debe estar entre 600 y 3000 píxeles');
         }
 
         if (settings.jsMaxConcurrentPages < 1 || settings.jsMaxConcurrentPages > 10) {
-            errors.push('JavaScript concurrent pages must be between 1 and 10');
+            errors.push('Las páginas concurrentes de JavaScript deben estar entre 1 y 10');
         }
 
         if (!settings.jsUserAgent.trim()) {
-            errors.push('JavaScript user agent cannot be empty');
+            errors.push('El User Agent de JavaScript no puede estar vacío');
         }
     }
 
@@ -661,18 +661,18 @@ function validateSettings(settings) {
         try {
             new URL(settings.proxyUrl);
         } catch (e) {
-            errors.push('Invalid proxy URL format');
+            errors.push('Formato de URL de proxy no válido');
         }
     }
 
     // Validate user agent
     if (!settings.userAgent.trim()) {
-        errors.push('User agent cannot be empty');
+        errors.push('El User Agent no puede estar vacío');
     }
 
     // Validate export fields
     if (settings.exportFields.length === 0) {
-        errors.push('At least one export field must be selected');
+        errors.push('Debe seleccionarse al menos un campo de exportación');
     }
 
     return {
@@ -780,13 +780,13 @@ function populateReportSettingsForm() {
     keyInput.value = '';
     keyInput.placeholder = reportSettings.has_openrouter_api_key
         ? `Saved: ${reportSettings.masked_openrouter_api_key}`
-        : 'Paste OpenRouter API key';
+        : 'Pega la clave API de OpenRouter';
 
     const keyStatus = document.getElementById('reportOpenRouterKeyStatus');
     if (keyStatus) {
         keyStatus.textContent = reportSettings.has_openrouter_api_key
             ? `Saved key: ${reportSettings.masked_openrouter_api_key}`
-            : 'No key saved';
+            : 'No hay clave guardada';
     }
 
     populateReportModelSelect('reportModelSelect', reportSettings.default_model);
@@ -832,7 +832,7 @@ async function saveReportSettings() {
         });
         const data = await response.json();
         if (!data.success) {
-            reportNotice('Report settings failed: ' + (data.error || 'Unknown error'), 'error');
+            reportNotice('Los ajustes de informes han fallado: ' + (data.error || 'Error desconocido'), 'error');
             return false;
         }
         reportSettings = { ...defaultReportSettings, ...data.settings };
@@ -840,7 +840,7 @@ async function saveReportSettings() {
         return true;
     } catch (error) {
         console.error('Error saving report settings:', error);
-        reportNotice('Report settings failed', 'error');
+        reportNotice('Los ajustes de informes han fallado', 'error');
         return false;
     }
 }
@@ -858,16 +858,16 @@ async function refreshReportModels() {
         });
         const data = await response.json();
         if (!data.success) {
-            reportNotice('Model refresh failed: ' + (data.error || 'Unknown error'), 'error');
+            reportNotice('La actualización de modelos ha fallado: ' + (data.error || 'Error desconocido'), 'error');
             return;
         }
         reportModels = data.models || [];
         populateReportModelSelect('reportModelSelect', reportSettings.default_model);
         populateReportModelSelect('reportGenerateModelSelect', reportSettings.default_model, true);
-        reportNotice('Report models refreshed', 'success');
+        reportNotice('Modelos de informe actualizados', 'success');
     } catch (error) {
         console.error('Error refreshing report models:', error);
-        reportNotice('Model refresh failed', 'error');
+        reportNotice('La actualización de modelos ha fallado', 'error');
     } finally {
         if (button) button.disabled = false;
     }
@@ -880,12 +880,12 @@ function populateReportModelSelect(selectId, selectedModel, includeSavedDefault 
     select.innerHTML = '';
     const emptyOption = document.createElement('option');
     emptyOption.value = '';
-    emptyOption.textContent = includeSavedDefault ? 'Use saved default' : 'Select a model';
+    emptyOption.textContent = includeSavedDefault ? 'Usar valor guardado' : 'Selecciona un modelo';
     select.appendChild(emptyOption);
 
     const groups = {};
     reportModels.forEach(model => {
-        const provider = model.provider || (model.id || '').split('/')[0] || 'Other';
+        const provider = model.provider || (model.id || '').split('/')[0] || 'Otros';
         if (!groups[provider]) {
             groups[provider] = document.createElement('optgroup');
             groups[provider].label = provider.charAt(0).toUpperCase() + provider.slice(1);
@@ -901,7 +901,7 @@ function populateReportModelSelect(selectId, selectedModel, includeSavedDefault 
     if (selectedModel && !Array.from(select.options).some(option => option.value === selectedModel)) {
         const savedOption = document.createElement('option');
         savedOption.value = selectedModel;
-        savedOption.textContent = `${selectedModel} (saved)`;
+        savedOption.textContent = `${selectedModel} (guardado)`;
         select.appendChild(savedOption);
     }
 
@@ -960,17 +960,17 @@ function importSettings(event) {
             // Validate imported settings
             const validation = validateSettings(importedSettings);
             if (!validation.valid) {
-                alert('Invalid settings file: ' + validation.errors.join(', '));
+                alert('Archivo de ajustes no válido: ' + validation.errors.join(', '));
                 return;
             }
 
             // Merge with defaults to ensure all fields are present
             currentSettings = { ...defaultSettings, ...importedSettings };
             populateSettingsForm();
-            showNotification('Settings imported successfully', 'success');
+            showNotification('Ajustes importados correctamente', 'success');
 
         } catch (error) {
-            alert('Invalid settings file format');
+            alert('Formato de archivo de ajustes no válido');
         }
     };
     reader.readAsText(file);

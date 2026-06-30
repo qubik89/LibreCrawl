@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - Mitmore SEO Crawl</title>
+    <title>Registro - Mitmore SEO Crawl</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -167,45 +167,45 @@
     <div class="register-container">
         <div class="logo">
             <h1>Mitmore SEO Crawl</h1>
-            <p>Create your account</p>
+            <p>Crea tu cuenta</p>
         </div>
 
         <div id="alert" class="alert"></div>
 
         {% if registration_disabled %}
         <div class="alert alert-error show">
-            Registrations are currently disabled. Please contact the administrator.
+            Los registros están desactivados. Contacta con el administrador.
         </div>
         {% endif %}
 
         <form id="registerForm">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username">Usuario</label>
                 <input type="text" id="username" name="username" required autofocus>
-                <div class="input-hint">At least 3 characters</div>
+                <div class="input-hint">Al menos 3 caracteres</div>
             </div>
 
             <div class="form-group">
-                <label for="email">Email</label>
+                <label for="email">Correo electrónico</label>
                 <input type="email" id="email" name="email" required>
             </div>
 
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password">Contraseña</label>
                 <input type="password" id="password" name="password" required>
-                <div class="input-hint">At least 8 characters</div>
+                <div class="input-hint">Al menos 8 caracteres</div>
             </div>
 
             <div class="form-group">
-                <label for="confirmPassword">Confirm Password</label>
+                <label for="confirmPassword">Confirmar contraseña</label>
                 <input type="password" id="confirmPassword" name="confirmPassword" required>
             </div>
 
-            <button type="submit" class="btn" id="registerBtn">Register</button>
+            <button type="submit" class="btn" id="registerBtn">Registrarse</button>
         </form>
 
         <div class="login-link">
-            Already have an account? <a href="/login">Login here</a>
+            ¿Ya tienes cuenta? <a href="/login">Entra aquí</a>
         </div>
     </div>
 
@@ -221,10 +221,10 @@
             // Disable form submission
             form.addEventListener('submit', (e) => {
                 e.preventDefault();
-                window.alert('Registrations are disabled');
+                window.alert('Los registros están desactivados');
             });
             registerBtn.disabled = true;
-            registerBtn.textContent = 'Registration Disabled';
+            registerBtn.textContent = 'Registro desactivado';
         }
 
         function showAlert(message, type) {
@@ -247,22 +247,22 @@
 
             // Client-side validation
             if (password !== confirmPassword) {
-                showAlert('Passwords do not match', 'error');
+                showAlert('Las contraseñas no coinciden', 'error');
                 return;
             }
 
             if (password.length < 8) {
-                showAlert('Password must be at least 8 characters', 'error');
+                showAlert('La contraseña debe tener al menos 8 caracteres', 'error');
                 return;
             }
 
             if (username.length < 3) {
-                showAlert('Username must be at least 3 characters', 'error');
+                showAlert('El usuario debe tener al menos 3 caracteres', 'error');
                 return;
             }
 
             registerBtn.disabled = true;
-            registerBtn.textContent = 'Registering...';
+            registerBtn.textContent = 'Registrando...';
 
             try {
                 const response = await fetch('/api/register', {
@@ -284,12 +284,12 @@
                 } else {
                     showAlert(data.message, 'error');
                     registerBtn.disabled = false;
-                    registerBtn.textContent = 'Register';
+                    registerBtn.textContent = 'Registrarse';
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert('Se ha producido un error. Inténtalo de nuevo.', 'error');
                 registerBtn.disabled = false;
-                registerBtn.textContent = 'Register';
+                registerBtn.textContent = 'Registrarse';
             }
         });
     </script>

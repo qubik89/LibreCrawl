@@ -7,6 +7,18 @@ let reportPollTimer = null;
 let reportActionsEnabled = false;
 let dashboardRefreshTimer = null;
 
+function crawlStatusLabel(status) {
+    return {
+        completed: 'completado',
+        running: 'en curso',
+        paused: 'en pausa',
+        failed: 'fallido',
+        stopped: 'detenido',
+        archived: 'archivado',
+        unknown: 'desconocido'
+    }[status] || status;
+}
+
 async function openDashboard() {
     const modal = document.getElementById('dashboardModal');
 
@@ -29,14 +41,14 @@ async function loadDashboardCrawls() {
         const data = await response.json();
 
         if (!data.success) {
-            content.innerHTML = `<p style="color: #ef4444;">Error loading crawls: ${data.error}</p>`;
+            content.innerHTML = `<p style="color: #ef4444;">Error al cargar rastreos: ${data.error}</p>`;
             return;
         }
 
         const crawls = data.crawls || [];
 
         if (crawls.length === 0) {
-            content.innerHTML = `<p style="text-align: center; color: #9ca3af;">No saved crawls found.</p>`;
+            content.innerHTML = `<p style="text-align: center; color: #9ca3af;">No hay rastreos guardados.</p>`;
             return;
         }
 
@@ -44,14 +56,14 @@ async function loadDashboardCrawls() {
             <table class="data-table" style="width: 100%; table-layout: fixed;">
                 <thead>
                     <tr>
-                        <th style="width: 180px;">Date</th>
-                        <th style="width: 200px;">Domain</th>
+                        <th style="width: 180px;">Fecha</th>
+                        <th style="width: 200px;">Dominio</th>
                         <th style="width: 80px;">URLs</th>
-                        <th style="width: 80px;">Links</th>
-                        <th style="width: 80px;">Issues</th>
-                        <th style="width: 160px;">Progress</th>
-                        <th style="width: 100px;">Status</th>
-                        <th style="width: 360px;">Actions</th>
+                        <th style="width: 80px;">Enlaces</th>
+                        <th style="width: 80px;">Incidencias</th>
+                        <th style="width: 160px;">Progreso</th>
+                        <th style="width: 100px;">Estado</th>
+                        <th style="width: 360px;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -83,14 +95,14 @@ async function loadDashboardCrawls() {
                         </div>
                         <div style="font-size: 12px; color: #9ca3af; margin-top: 4px;">${progressLabel}</div>
                     </td>
-                    <td><span style="color: ${statusColor};">${status}</span></td>
+                    <td><span style="color: ${statusColor};">${crawlStatusLabel(status)}</span></td>
                     <td style="white-space: nowrap;">
-                        <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">View</button>
-                        ${running ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="pauseCrawlFromDashboard(${crawl.id})">Pause</button>` : ''}
-                        ${paused || ['paused', 'failed', 'stopped', 'running'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Resume</button>` : ''}
-                        ${completed && reportActionsEnabled ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="openReportModal(${crawl.id})">Report</button>` : ''}
-                        ${crawl.is_active ? `<button class="btn btn-danger" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="stopCrawlFromDashboard(${crawl.id})">Stop</button>` : ''}
-                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCrawlFromDashboard(${crawl.id})">Delete</button>
+                        <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">Ver</button>
+                        ${running ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="pauseCrawlFromDashboard(${crawl.id})">Pausar</button>` : ''}
+                        ${paused || ['paused', 'failed', 'stopped', 'running'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Reanudar</button>` : ''}
+                        ${completed && reportActionsEnabled ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="openReportModal(${crawl.id})">Informe</button>` : ''}
+                        ${crawl.is_active ? `<button class="btn btn-danger" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="stopCrawlFromDashboard(${crawl.id})">Detener</button>` : ''}
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCrawlFromDashboard(${crawl.id})">Eliminar</button>
                     </td>
                 </tr>
             `;
@@ -105,7 +117,7 @@ async function loadDashboardCrawls() {
 
     } catch (error) {
         console.error('Error loading dashboard:', error);
-        content.innerHTML = `<p style="color: #ef4444;">Error loading crawls.</p>`;
+        content.innerHTML = `<p style="color: #ef4444;">Error al cargar rastreos.</p>`;
     }
 }
 
@@ -143,7 +155,7 @@ async function getReportSettingsForGeneration() {
 
     const response = await fetch('/api/report-settings');
     const data = await response.json();
-    if (!data.success) throw new Error(data.error || 'Failed to load report settings');
+    if (!data.success) throw new Error(data.error || 'No se pudieron cargar los ajustes de informes');
     return data.settings || {};
 }
 
@@ -191,13 +203,13 @@ async function openReportModal(crawlId) {
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate PDF';
+            generateBtn.textContent = 'Generar PDF';
         }
 
         modal.style.display = 'flex';
     } catch (error) {
         console.error('Error opening report modal:', error);
-        reportDashboardNotice(error.message || 'Could not load report settings', 'error');
+        reportDashboardNotice(error.message || 'No se pudieron cargar los ajustes de informes', 'error');
     }
 }
 
@@ -234,7 +246,7 @@ async function submitReportGeneration() {
     const generateBtn = document.getElementById('reportGenerateBtn');
     if (generateBtn) {
         generateBtn.disabled = true;
-        generateBtn.textContent = 'Generating...';
+        generateBtn.textContent = 'Generando...';
     }
 
     await createReport(activeReportCrawlId, reportGenerationPayloadFromModal(), true);
@@ -243,14 +255,14 @@ async function submitReportGeneration() {
 async function generateReportWithDefaults(crawlId) {
     try {
         const settings = await getReportSettingsForGeneration();
-        const model = settings.manual_model || settings.default_model || 'saved model';
+        const model = settings.manual_model || settings.default_model || 'modelo guardado';
         const language = settings.default_language || 'es-ES';
         const tone = settings.default_tone || 'executive';
-        if (!confirm(`Generate PDF report with ${model}, ${language}, ${tone}?`)) return;
+        if (!confirm(`¿Generar informe PDF con ${model}, ${language}, ${tone}?`)) return;
         await createReport(crawlId, {}, false);
     } catch (error) {
         console.error('Error generating report:', error);
-        reportDashboardNotice(error.message || 'Could not generate report', 'error');
+        reportDashboardNotice(error.message || 'No se pudo generar el informe', 'error');
     }
 }
 
@@ -260,26 +272,26 @@ async function createReport(crawlId, payload, useModal) {
             clearTimeout(reportPollTimer);
             reportPollTimer = null;
         }
-        setReportStatus('Starting report...');
+        setReportStatus('Iniciando informe...');
         const response = await fetch(`/api/crawls/${crawlId}/reports`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload || {})
         });
         const data = await response.json();
-        if (!data.success) throw new Error(data.error || 'Report generation failed');
+        if (!data.success) throw new Error(data.error || 'La generación del informe ha fallado');
 
-        reportDashboardNotice('Report generation started', 'success');
+        reportDashboardNotice('Generación del informe iniciada', 'success');
         pollReportStatus(data.report_id, useModal);
     } catch (error) {
         console.error('Error creating report:', error);
-        setReportStatus(error.message || 'Report generation failed', true);
-        reportDashboardNotice(error.message || 'Report generation failed', 'error');
+        setReportStatus(error.message || 'La generación del informe ha fallado', true);
+        reportDashboardNotice(error.message || 'La generación del informe ha fallado', 'error');
 
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate PDF';
+            generateBtn.textContent = 'Generar PDF';
         }
     }
 }
@@ -288,13 +300,13 @@ async function pollReportStatus(reportId, useModal) {
     try {
         const response = await fetch(`/api/reports/${reportId}/status`);
         const data = await response.json();
-        if (!data.success) throw new Error(data.error || 'Report status failed');
+        if (!data.success) throw new Error(data.error || 'El estado del informe ha fallado');
 
         const report = data.report || {};
         if (report.status === 'completed') {
             reportPollTimer = null;
             const href = `/api/reports/${reportId}/download`;
-            setReportStatus('Report complete.');
+            setReportStatus('Informe completado.');
             showReportDownload(href);
             if (!useModal) window.location.href = href;
             return;
@@ -302,27 +314,27 @@ async function pollReportStatus(reportId, useModal) {
 
         if (report.status === 'failed') {
             reportPollTimer = null;
-            setReportStatus(report.error || 'Report generation failed', true);
-            reportDashboardNotice('Report generation failed', 'error');
+            setReportStatus(report.error || 'La generación del informe ha fallado', true);
+            reportDashboardNotice('La generación del informe ha fallado', 'error');
             const generateBtn = document.getElementById('reportGenerateBtn');
             if (generateBtn) {
                 generateBtn.disabled = false;
-                generateBtn.textContent = 'Generate PDF';
+                generateBtn.textContent = 'Generar PDF';
             }
             return;
         }
 
-        setReportStatus(`Report ${report.status || 'queued'}...`);
+        setReportStatus(`Informe ${report.status || 'en cola'}...`);
         reportPollTimer = setTimeout(() => pollReportStatus(reportId, useModal), 2000);
     } catch (error) {
         reportPollTimer = null;
         console.error('Error polling report:', error);
-        setReportStatus(error.message || 'Report status failed', true);
-        reportDashboardNotice(error.message || 'Report status failed', 'error');
+        setReportStatus(error.message || 'El estado del informe ha fallado', true);
+        reportDashboardNotice(error.message || 'El estado del informe ha fallado', 'error');
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generate PDF';
+            generateBtn.textContent = 'Generar PDF';
         }
     }
 }
@@ -347,12 +359,12 @@ function showReportDownload(href) {
     const generateBtn = document.getElementById('reportGenerateBtn');
     if (generateBtn) {
         generateBtn.disabled = false;
-        generateBtn.textContent = 'Generate Again';
+        generateBtn.textContent = 'Generar de nuevo';
     }
 }
 
 async function loadCrawlFromDashboard(crawlId) {
-    if (!confirm('Load this crawl? Any unsaved current data will be lost.')) return;
+    if (!confirm('¿Cargar este rastreo? Se perderán los datos actuales no guardados.')) return;
 
     try {
         const response = await fetch(`/api/crawls/${crawlId}/load`, {
@@ -368,16 +380,16 @@ async function loadCrawlFromDashboard(crawlId) {
         closeDashboard();
         await attachToServerCrawl(crawlId);
 
-        showNotification('Crawl loaded successfully', 'success');
+        showNotification('Rastreo cargado correctamente', 'success');
 
     } catch (error) {
         console.error('Error loading crawl:', error);
-        alert('Error loading crawl');
+        alert('Error al cargar el rastreo');
     }
 }
 
 async function resumeCrawlFromDashboard(crawlId) {
-    if (!confirm('Resume this crawl? Any unsaved current data will be lost.')) return;
+    if (!confirm('¿Reanudar este rastreo? Se perderán los datos actuales no guardados.')) return;
 
     try {
         const response = await fetch(`/api/crawls/${crawlId}/resume`, {
@@ -393,11 +405,11 @@ async function resumeCrawlFromDashboard(crawlId) {
         closeDashboard();
         await attachToServerCrawl(crawlId);
 
-        showNotification('Crawl resumed successfully', 'success');
+        showNotification('Rastreo reanudado correctamente', 'success');
 
     } catch (error) {
         console.error('Error resuming crawl:', error);
-        alert('Error resuming crawl');
+        alert('Error al reanudar el rastreo');
     }
 }
 
@@ -406,36 +418,36 @@ async function pauseCrawlFromDashboard(crawlId) {
         const response = await fetch(`/api/crawls/${crawlId}/pause`, { method: 'POST' });
         const data = await response.json();
         if (!data.success) {
-            alert('Error pausing crawl: ' + (data.error || data.message));
+            alert('Error al pausar el rastreo: ' + (data.error || data.message));
             return;
         }
-        showNotification('Crawl paused', 'success');
+        showNotification('Rastreo pausado', 'success');
         openDashboard();
     } catch (error) {
         console.error('Error pausing crawl:', error);
-        alert('Error pausing crawl');
+        alert('Error al pausar el rastreo');
     }
 }
 
 async function stopCrawlFromDashboard(crawlId) {
-    if (!confirm('Stop this crawl?')) return;
+    if (!confirm('¿Detener este rastreo?')) return;
     try {
         const response = await fetch(`/api/crawls/${crawlId}/stop`, { method: 'POST' });
         const data = await response.json();
         if (!data.success) {
-            alert('Error stopping crawl: ' + (data.error || data.message));
+            alert('Error al detener el rastreo: ' + (data.error || data.message));
             return;
         }
-        showNotification('Crawl stopped', 'success');
+        showNotification('Rastreo detenido', 'success');
         openDashboard();
     } catch (error) {
         console.error('Error stopping crawl:', error);
-        alert('Error stopping crawl');
+        alert('Error al detener el rastreo');
     }
 }
 
 async function deleteCrawlFromDashboard(crawlId) {
-    if (!confirm('Delete this crawl permanently? This cannot be undone.')) return;
+    if (!confirm('¿Eliminar este rastreo permanentemente? Esta acción no se puede deshacer.')) return;
 
     try {
         const response = await fetch(`/api/crawls/${crawlId}/delete`, {
@@ -444,14 +456,14 @@ async function deleteCrawlFromDashboard(crawlId) {
         const data = await response.json();
 
         if (data.success) {
-            showNotification('Crawl deleted', 'success');
+            showNotification('Rastreo eliminado', 'success');
             // Reload dashboard
             openDashboard();
         } else {
-            alert('Error deleting crawl: ' + data.error);
+            alert('Error al eliminar el rastreo: ' + data.error);
         }
     } catch (error) {
         console.error('Error deleting crawl:', error);
-        alert('Error deleting crawl');
+        alert('Error al eliminar el rastreo');
     }
 }

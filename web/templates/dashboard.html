@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crawl History - Mitmore SEO Crawl</title>
+    <title>Historial de rastreos - Mitmore SEO Crawl</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -254,27 +254,27 @@
     <div class="container">
         <div class="header">
             <div>
-                <h1>Crawl History</h1>
-                <p>View, resume, and manage your crawl sessions</p>
+                <h1>Historial de rastreos</h1>
+                <p>Consulta, reanuda y gestiona tus sesiones de rastreo</p>
             </div>
-            <a href="/" class="btn btn-primary">Back to Crawler</a>
+            <a href="/" class="btn btn-primary">Volver al rastreador</a>
         </div>
 
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-label">Total Crawls</div>
+                <div class="stat-label">Rastreos totales</div>
                 <div class="stat-value" id="total-crawls">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Completed</div>
+                <div class="stat-label">Completados</div>
                 <div class="stat-value" id="completed-crawls">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Active</div>
+                <div class="stat-label">Activos</div>
                 <div class="stat-value" id="running-crawls">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Database Size</div>
+                <div class="stat-label">Tamaño de base de datos</div>
                 <div class="stat-value" id="db-size">-</div>
             </div>
         </div>
@@ -283,20 +283,20 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Started</th>
+                        <th>Inicio</th>
                         <th>URL</th>
-                        <th>Status</th>
+                        <th>Estado</th>
                         <th>URLs</th>
-                        <th>Progress</th>
-                        <th>Duration</th>
-                        <th>Actions</th>
+                        <th>Progreso</th>
+                        <th>Duración</th>
+                        <th>Acciones</th>
                     </tr>
                 </thead>
                 <tbody id="crawls-tbody">
                     <tr>
                         <td colspan="7" class="loading">
                             <div class="spinner"></div>
-                            <div style="margin-top: 16px;">Loading crawls...</div>
+                            <div style="margin-top: 16px;">Cargando rastreos...</div>
                         </td>
                     </tr>
                 </tbody>
@@ -306,6 +306,18 @@
 
     <script>
         let reportActionsEnabled = false;
+
+        function crawlStatusLabel(status) {
+            return {
+                completed: 'completado',
+                running: 'en curso',
+                paused: 'en pausa',
+                failed: 'fallido',
+                stopped: 'detenido',
+                archived: 'archivado',
+                unknown: 'desconocido'
+            }[status] || status;
+        }
 
         function formatNumber(value, options = {}) {
             return Number(value || 0).toLocaleString(undefined, options);
@@ -349,7 +361,7 @@
                         const started = new Date(crawl.started_at).toLocaleString();
                         const duration = crawl.completed_at
                             ? calculateDuration(crawl.started_at, crawl.completed_at)
-                            : 'In progress';
+                            : 'En curso';
                         const crawled = crawl.urls_crawled || 0;
                         const discovered = Math.max(crawl.urls_discovered || 0, crawled);
                         const progress = discovered ? Math.min(100, (crawled / discovered) * 100) : 0;
@@ -358,7 +370,7 @@
                             <tr>
                                 <td>${started}</td>
                                 <td><a href="${crawl.base_url}" target="_blank" class="url-link">${crawl.base_url}</a></td>
-                                <td><span class="status-badge status-${crawl.status}">${crawl.status}</span></td>
+                                <td><span class="status-badge status-${crawl.status}">${crawlStatusLabel(crawl.status)}</span></td>
                                 <td>${formatNumber(crawled)}</td>
                                 <td>
                                     <div style="height: 6px; background: #e5e7eb; border-radius: 999px; overflow: hidden;">
@@ -369,15 +381,15 @@
                                 <td>${duration}</td>
                                 <td class="actions">
                                     ${(crawl.status === 'paused' || crawl.status === 'failed' || crawl.status === 'stopped' || crawl.status === 'running')
-                                        ? `<button class="btn btn-primary btn-small" onclick="resumeCrawl(${crawl.id})">Resume</button>`
+                                        ? `<button class="btn btn-primary btn-small" onclick="resumeCrawl(${crawl.id})">Reanudar</button>`
                                         : ''}
                                     ${crawl.urls_crawled > 0
-                                        ? `<button class="btn btn-secondary btn-small" onclick="viewCrawl(${crawl.id})">Load</button>`
+                                        ? `<button class="btn btn-secondary btn-small" onclick="viewCrawl(${crawl.id})">Cargar</button>`
                                         : ''}
                                     ${crawl.status === 'completed' && reportActionsEnabled
-                                        ? `<button class="btn btn-secondary btn-small" id="report-btn-${crawl.id}" onclick="generateReport(${crawl.id})">Report</button>`
+                                        ? `<button class="btn btn-secondary btn-small" id="report-btn-${crawl.id}" onclick="generateReport(${crawl.id})">Informe</button>`
                                         : ''}
-                                    <button class="btn btn-danger btn-small" onclick="deleteCrawl(${crawl.id})">Delete</button>
+                                    <button class="btn btn-danger btn-small" onclick="deleteCrawl(${crawl.id})">Eliminar</button>
                                 </td>
                             </tr>
                         `;
@@ -386,8 +398,8 @@
                     tbody.innerHTML = `
                         <tr>
                             <td colspan="6" class="empty-state">
-                                <h3>No crawls found</h3>
-                                <p>Start a new crawl from the main application</p>
+                                <h3>No hay rastreos</h3>
+                                <p>Inicia un nuevo rastreo desde la aplicación principal</p>
                             </td>
                         </tr>
                     `;
@@ -397,7 +409,7 @@
                 document.getElementById('crawls-tbody').innerHTML = `
                     <tr>
                         <td colspan="6" class="empty-state">
-                            <h3>Error loading crawls</h3>
+                            <h3>Error al cargar los rastreos</h3>
                             <p>${error.message}</p>
                         </td>
                     </tr>
@@ -420,7 +432,7 @@
         }
 
         async function resumeCrawl(crawlId) {
-            if (!confirm('Resume this crawl? It will continue from where it left off.')) return;
+            if (!confirm('¿Reanudar este rastreo? Continuará desde donde se quedó.')) return;
 
             try {
                 const response = await fetch(`/api/crawls/${crawlId}/resume`, {
@@ -436,12 +448,12 @@
                     alert('Error: ' + data.message);
                 }
             } catch (error) {
-                alert('Error resuming crawl: ' + error.message);
+                alert('Error al reanudar el rastreo: ' + error.message);
             }
         }
 
         async function viewCrawl(crawlId) {
-            if (!confirm('Load this crawl? Any unsaved current data will be lost.')) return;
+            if (!confirm('¿Cargar este rastreo? Se perderán los datos actuales no guardados.')) return;
 
             try {
                 const response = await fetch(`/api/crawls/${crawlId}/load`, {
@@ -460,12 +472,12 @@
                     alert('Error: ' + (data.error || data.message));
                 }
             } catch (error) {
-                alert('Error loading crawl: ' + error.message);
+                alert('Error al cargar el rastreo: ' + error.message);
             }
         }
 
         async function deleteCrawl(crawlId) {
-            if (!confirm('Delete this crawl permanently? This cannot be undone.')) return;
+            if (!confirm('¿Eliminar este rastreo permanentemente? Esta acción no se puede deshacer.')) return;
 
             try {
                 const response = await fetch(`/api/crawls/${crawlId}/delete`, {
@@ -480,7 +492,7 @@
                     alert('Error: ' + data.message);
                 }
             } catch (error) {
-                alert('Error deleting crawl: ' + error.message);
+                alert('Error al eliminar el rastreo: ' + error.message);
             }
         }
 

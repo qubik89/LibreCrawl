@@ -90,7 +90,7 @@ async function initializeApp() {
             await attachToServerCrawl(parseInt(loadedCrawlId, 10));
         } catch (error) {
             console.error('Error loading crawl data:', error);
-            updateStatus('Error loading crawl data');
+            updateStatus('Error al cargar datos del rastreo');
         }
     }
 
@@ -139,7 +139,7 @@ function startCrawl() {
     let url = urlInput.value.trim();
 
     if (!url) {
-        alert('Please enter a URL to crawl');
+        alert('Introduce una URL para rastrear');
         urlInput.focus();
         return;
     }
@@ -148,7 +148,7 @@ function startCrawl() {
     url = normalizeUrl(url);
 
     if (!isValidUrl(url)) {
-        alert('Please enter a valid URL or domain');
+        alert('Introduce una URL o dominio válido');
         urlInput.focus();
         return;
     }
@@ -172,7 +172,7 @@ function startCrawl() {
     // Update UI
     updateCrawlButtons();
     showProgress();
-    updateStatus('Starting crawl...');
+    updateStatus('Iniciando rastreo...');
 
     // Clear previous data
     clearAllTables();
@@ -185,7 +185,7 @@ function startCrawl() {
 function pauseCrawl() {
     crawlState.isPaused = true;
     updateCrawlButtons();
-    updateStatus('Crawl paused');
+    updateStatus('Rastreo en pausa');
 
     // Pause Python crawler
     fetch(crawlState.currentCrawlId ? `/api/crawls/${crawlState.currentCrawlId}/pause` : '/api/pause_crawl', {
@@ -198,7 +198,7 @@ function pauseCrawl() {
 function resumeCrawl() {
     crawlState.isPaused = false;
     updateCrawlButtons();
-    updateStatus('Resuming crawl...');
+    updateStatus('Reanudando rastreo...');
 
     // Resume Python crawler
     fetch(crawlState.currentCrawlId ? `/api/crawls/${crawlState.currentCrawlId}/resume` : '/api/resume_crawl', {
@@ -215,7 +215,7 @@ function stopCrawl() {
     // Update UI
     updateCrawlButtons();
     hideProgress();
-    updateStatus('Crawl stopped');
+    updateStatus('Rastreo detenido');
 
     // Stop Python crawler
     stopPythonCrawl();
@@ -223,7 +223,7 @@ function stopCrawl() {
 
 function clearCrawlData() {
     if (crawlState.isRunning) {
-        if (!confirm('A crawl is currently running. Stop the crawl and clear all data?')) {
+        if (!confirm('Hay un rastreo en curso. ¿Detenerlo y borrar todos los datos?')) {
             return;
         }
         stopCrawl();
@@ -278,7 +278,7 @@ function clearCrawlData() {
     document.querySelector('[data-filter="all"]')?.classList.add('active');
 
     // Update UI
-    updateStatus('Data cleared');
+    updateStatus('Datos borrados');
     hideProgress();
     updateCrawlButtons(); // Update save/load button states
 
@@ -301,7 +301,7 @@ function startPythonCrawl(url) {
         if (data.success) {
             crawlState.currentCrawlId = data.crawl_id;
             sessionStorage.setItem('current_crawl_id', data.crawl_id);
-            updateStatus('Crawling in progress...');
+            updateStatus('Rastreo en curso...');
             // Refresh user info to update crawl count
             loadUserInfo();
             loadActiveTabPage(true);
@@ -314,7 +314,7 @@ function startPythonCrawl(url) {
     })
     .catch(error => {
         console.error('Error starting crawl:', error);
-        updateStatus('Error starting crawl');
+        updateStatus('Error al iniciar el rastreo');
         stopCrawl();
     });
 }
@@ -343,9 +343,9 @@ async function pollCrawlProgress() {
         updateCrawlData(data);
 
         if (data.is_running_pagespeed) {
-            updateStatus('Running PageSpeed analysis...');
+            updateStatus('Ejecutando análisis PageSpeed...');
         } else if (data.status === 'running') {
-            updateStatus('Crawling in progress...');
+            updateStatus('Rastreo en curso...');
         }
 
         const vizTab = document.getElementById('visualization-tab');
@@ -356,7 +356,7 @@ async function pollCrawlProgress() {
         if (data.status === 'demo_stopped' || data.demo_stopped) {
             crawlState.isRunning = false;
             updateCrawlButtons();
-            updateStatus('Demo limit reached — crawl data saved');
+            updateStatus('Límite de demo alcanzado: datos del rastreo guardados');
             showDemoLimitNotification();
         } else if (crawlState.isRunning && data.status !== 'completed' && data.status !== 'failed' && data.status !== 'stopped') {
             setTimeout(pollCrawlProgress, 1000);
@@ -364,7 +364,7 @@ async function pollCrawlProgress() {
             crawlState.isRunning = false;
             updateCrawlButtons();
             hideProgress();
-            updateStatus('Crawl completed');
+            updateStatus('Rastreo completado');
             if (window.MitmoreSEOCrawlPlugin && window.MitmoreSEOCrawlPlugin.loader) {
                 window.MitmoreSEOCrawlPlugin.loader.notifyCrawlComplete({
                     urls: crawlState.urls,
@@ -377,7 +377,7 @@ async function pollCrawlProgress() {
             crawlState.isRunning = false;
             updateCrawlButtons();
             hideProgress();
-            updateStatus(data.status === 'failed' ? 'Crawl failed' : 'Crawl stopped');
+            updateStatus(data.status === 'failed' ? 'Rastreo fallido' : 'Rastreo detenido');
         }
     } catch (error) {
         console.error('Error polling crawl status:', error);
@@ -564,7 +564,7 @@ async function attachToServerCrawl(crawlId) {
 
     const response = await fetch(`/api/crawls/${crawlId}/status`);
     const data = await response.json();
-    if (!data.success) throw new Error(data.error || 'Failed to attach crawl');
+    if (!data.success) throw new Error(data.error || 'No se pudo adjuntar el rastreo');
 
     crawlState.baseUrl = data.stats?.baseUrl || '';
     if (crawlState.baseUrl) document.getElementById('urlInput').value = crawlState.baseUrl;
@@ -576,7 +576,7 @@ async function attachToServerCrawl(crawlId) {
     updateCrawlData(data);
     loadActiveTabPage(true);
     updateCrawlButtons();
-    updateStatus(crawlState.isRunning ? 'Attached to running crawl' : `Loaded crawl: ${data.stats?.crawled || 0} URLs`);
+    updateStatus(crawlState.isRunning ? 'Adjuntado a rastreo en curso' : `Rastreo cargado: ${data.stats?.crawled || 0} URLs`);
 
     if (crawlState.isRunning) pollCrawlProgress();
 }
@@ -659,22 +659,22 @@ function updateProgressText(data) {
     if (!progressText) return;
 
     if (data.is_running_pagespeed) {
-        progressText.textContent = 'Running PageSpeed analysis...';
+        progressText.textContent = 'Ejecutando análisis PageSpeed...';
     } else if (data.status === 'completed') {
-        progressText.textContent = 'Crawl completed';
+        progressText.textContent = 'Rastreo completado';
     } else if (data.status === 'paused') {
-        progressText.textContent = 'Crawl paused';
+        progressText.textContent = 'Rastreo en pausa';
     } else if (data.status === 'running') {
         const stats = data.stats || crawlState.stats;
         if (stats.crawled === 0) {
-            progressText.textContent = 'Starting crawl...';
+            progressText.textContent = 'Iniciando rastreo...';
         } else if (stats.discovered > stats.crawled) {
-            progressText.textContent = `Crawling... (${formatNumber(stats.crawled)}/${formatNumber(stats.discovered)} URLs)`;
+            progressText.textContent = `Rastreando... (${formatNumber(stats.crawled)}/${formatNumber(stats.discovered)} URLs)`;
         } else {
-            progressText.textContent = `Finishing up... (${formatNumber(stats.crawled)} URLs crawled)`;
+            progressText.textContent = `Terminando... (${formatNumber(stats.crawled)} URLs rastreadas)`;
         }
     } else {
-        progressText.textContent = 'Initializing...';
+        progressText.textContent = 'Inicializando...';
     }
 }
 
@@ -721,7 +721,7 @@ function updateCrawlButtons() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7z"/>
                 </svg>
-                Resume
+                Reanudar
             `;
         } else {
             startBtn.innerHTML = `
@@ -729,7 +729,7 @@ function updateCrawlButtons() {
                     <rect x="6" y="4" width="4" height="16"/>
                     <rect x="14" y="4" width="4" height="16"/>
                 </svg>
-                Pause
+                Pausar
             `;
         }
         startBtn.disabled = false;
@@ -742,7 +742,7 @@ function updateCrawlButtons() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8 5v14l11-7z"/>
             </svg>
-            Start
+            Iniciar
         `;
         startBtn.disabled = false;
         stopBtn.disabled = true;
@@ -794,11 +794,11 @@ function showDemoLimitNotification() {
     `;
     box.innerHTML = `
         <div style="font-size: 28px; margin-bottom: 12px;">&#9888;</div>
-        <h2 style="color: #f59e0b; margin: 0 0 12px; font-size: 18px;">Demo Memory Limit Reached</h2>
+        <h2 style="color: #f59e0b; margin: 0 0 12px; font-size: 18px;">Límite de memoria de demo alcanzado</h2>
         <p style="margin: 0 0 16px; line-height: 1.5; font-size: 14px;">
-            This user has reached the 1.5 GB per-user memory limit.<br>
-            Your crawl data has been saved automatically.<br><br>
-            <strong>This is a free demo and is not intended for production use.</strong>
+            Este usuario ha alcanzado el límite de memoria de 1,5 GB por usuario.<br>
+            Los datos del rastreo se han guardado automáticamente.<br><br>
+            <strong>Esta es una demo gratuita y no está pensada para uso en producción.</strong>
         </p>
         <button id="demoLimitDismiss" style="
             background: #f59e0b; color: #000; border: none; padding: 10px 28px;
@@ -1098,16 +1098,16 @@ function updateIssuesTable(issues) {
     }
 
     // Update issue count in tab button (find the button, not the tab content)
-    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Incidencias'));
     if (issuesTabButton) {
         if (totalIssues > 0) {
             let badgeColor = '#3b82f6';
             if (errorCount > 0) badgeColor = '#ef4444';
             else if (warningCount > 0) badgeColor = '#f59e0b';
 
-            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(totalIssues)}</span>`;
+            issuesTabButton.innerHTML = `Incidencias <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(totalIssues)}</span>`;
         } else {
-            issuesTabButton.innerHTML = 'Issues';
+            issuesTabButton.innerHTML = 'Incidencias';
         }
     }
 }
@@ -1646,25 +1646,25 @@ function updateStatusCodesTable(filterType = null) {
 
 function getStatusCodeText(statusCode, errorType) {
     if (statusCode >= 200 && statusCode < 300) {
-        return 'Success';
+        return 'Correcta';
     } else if (statusCode >= 300 && statusCode < 400) {
-        return 'Redirect';
+        return 'Redirección';
     } else if (statusCode >= 400 && statusCode < 500) {
-        return 'Client Error';
+        return 'Error de cliente';
     } else if (statusCode >= 500) {
-        return 'Server Error';
+        return 'Error de servidor';
     } else if (statusCode === 0) {
         switch (errorType) {
-            case 'dns_not_found':       return 'DNS Not Found';
-            case 'connection_refused':  return 'Connection Refused';
-            case 'timeout':             return 'Timeout';
-            case 'ssl_error':           return 'SSL/TLS Error';
-            case 'connection_error':    return 'Connection Error';
-            case 'file_too_large':      return 'Skipped (file too large)';
-            default:                    return 'No Response';
+            case 'dns_not_found':       return 'DNS no encontrado';
+            case 'connection_refused':  return 'Conexión rechazada';
+            case 'timeout':             return 'Tiempo de espera agotado';
+            case 'ssl_error':           return 'Error SSL/TLS';
+            case 'connection_error':    return 'Error de conexión';
+            case 'file_too_large':      return 'Omitido (archivo demasiado grande)';
+            default:                    return 'Sin respuesta';
         }
     } else {
-        return 'Unknown';
+        return 'Desconocido';
     }
 }
 
@@ -1750,7 +1750,7 @@ async function loadUserInfo() {
             if (user.tier === 'guest') {
                 // Show crawls remaining for guests
                 const remaining = user.crawls_remaining;
-                userInfoElement.textContent = `Guest (${remaining}/3 crawls remaining)`;
+                userInfoElement.textContent = `Invitado (${remaining}/3 rastreos restantes)`;
                 userInfoElement.style.color = remaining === 0 ? '#dc2626' : '#6b7280';
             } else {
                 // Show username and tier for registered users
@@ -1770,7 +1770,7 @@ async function exportData() {
         const settingsData = await settingsResponse.json();
 
         if (!settingsData.success) {
-            showNotification('Failed to get export settings', 'error');
+            showNotification('No se pudieron obtener los ajustes de exportación', 'error');
             return;
         }
 
@@ -1807,11 +1807,11 @@ async function exportData() {
         }
 
         if (!hasData) {
-            showNotification('No crawl data to export', 'error');
+            showNotification('No hay datos de rastreo para exportar', 'error');
             return;
         }
 
-        showNotification('Preparing export...', 'info');
+        showNotification('Preparando exportación...', 'info');
 
         const exportPayload = {
             format: exportFormat,
@@ -1839,7 +1839,7 @@ async function exportData() {
         const exportData = await exportResponse.json();
 
         if (!exportData.success) {
-            showNotification(exportData.error || 'Export failed', 'error');
+            showNotification(exportData.error || 'La exportación ha fallado', 'error');
             return;
         }
 
@@ -1861,7 +1861,7 @@ async function exportData() {
                 }, index * 500); // Delay between downloads to avoid browser blocking
             });
 
-            showNotification(`Exporting ${exportData.files.length} files...`, 'success');
+            showNotification(`Exportando ${exportData.files.length} archivos...`, 'success');
         } else {
             // Single file download (original logic)
             const blob = new Blob([exportData.content], { type: exportData.mimetype });
@@ -1875,12 +1875,12 @@ async function exportData() {
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
 
-            showNotification(`Export complete: ${exportData.filename}`, 'success');
+            showNotification(`Exportación completada: ${exportData.filename}`, 'success');
         }
 
     } catch (error) {
         console.error('Export error:', error);
-        showNotification('Export failed', 'error');
+        showNotification('La exportación ha fallado', 'error');
     }
 }
 
@@ -1896,7 +1896,7 @@ function showUrlDetails(url) {
     // Find the URL data
     const urlData = crawlState.urls.find(u => u.url === url);
     if (!urlData) {
-        showNotification('URL data not found', 'error');
+        showNotification('No se encontraron datos de la URL', 'error');
         return;
     }
 
@@ -1918,7 +1918,7 @@ function showUrlDetails(url) {
         <div class="details-modal-overlay" onclick="closeUrlDetails()">
             <div class="details-modal" onclick="event.stopPropagation()">
                 <div class="details-header">
-                    <h3>Comprehensive URL Analysis</h3>
+                    <h3>Análisis completo de URL</h3>
                     <button class="close-btn" onclick="closeUrlDetails()">×</button>
                 </div>
                 <div class="details-content">
@@ -1926,13 +1926,13 @@ function showUrlDetails(url) {
 
                     <div class="details-sections">
                         <div class="details-section">
-                            <h4>🔍 Basic SEO</h4>
+                            <h4>🔍 SEO básico</h4>
                             <div class="details-grid">
-                                <div><strong>Title:</strong> ${safeTitle}</div>
+                                <div><strong>Título:</strong> ${safeTitle}</div>
                                 <div><strong>H1:</strong> ${safeH1}</div>
                                 <div><strong>Meta Description:</strong> ${safeMetaDesc}</div>
-                                <div><strong>Word Count:</strong> ${urlData.word_count || 0}</div>
-                                <div><strong>Language:</strong> ${safeLang}</div>
+                                <div><strong>Palabras:</strong> ${urlData.word_count || 0}</div>
+                                <div><strong>Idioma:</strong> ${safeLang}</div>
                                 <div><strong>Charset:</strong> ${safeCharset}</div>
                                 <div><strong>Canonical URL:</strong> ${safeCanonical}</div>
                                 <div><strong>Robots Meta:</strong> ${safeRobots}</div>
@@ -1940,27 +1940,27 @@ function showUrlDetails(url) {
                         </div>
 
                         <div class="details-section">
-                            <h4>📊 Analytics & Tracking</h4>
+                            <h4>📊 Analytics y seguimiento</h4>
                             <div class="details-grid">
-                                <div><strong>Google Analytics:</strong> ${urlData.analytics?.google_analytics ? '✅ Yes' : '❌ No'}</div>
-                                <div><strong>GA4/Gtag:</strong> ${urlData.analytics?.gtag ? '✅ Yes' : '❌ No'}</div>
+                                <div><strong>Google Analytics:</strong> ${urlData.analytics?.google_analytics ? '✅ Sí' : '❌ No'}</div>
+                                <div><strong>GA4/Gtag:</strong> ${urlData.analytics?.gtag ? '✅ Sí' : '❌ No'}</div>
                                 <div><strong>GA4 ID:</strong> ${safeGa4Id}</div>
                                 <div><strong>GTM ID:</strong> ${safeGtmId}</div>
-                                <div><strong>Facebook Pixel:</strong> ${urlData.analytics?.facebook_pixel ? '✅ Yes' : '❌ No'}</div>
-                                <div><strong>Hotjar:</strong> ${urlData.analytics?.hotjar ? '✅ Yes' : '❌ No'}</div>
-                                <div><strong>Mixpanel:</strong> ${urlData.analytics?.mixpanel ? '✅ Yes' : '❌ No'}</div>
+                                <div><strong>Facebook Pixel:</strong> ${urlData.analytics?.facebook_pixel ? '✅ Sí' : '❌ No'}</div>
+                                <div><strong>Hotjar:</strong> ${urlData.analytics?.hotjar ? '✅ Sí' : '❌ No'}</div>
+                                <div><strong>Mixpanel:</strong> ${urlData.analytics?.mixpanel ? '✅ Sí' : '❌ No'}</div>
                             </div>
                         </div>
 
                         <div class="details-section">
-                            <h4>📱 Social Media</h4>
+                            <h4>📱 Redes sociales</h4>
                             <div class="details-grid">
-                                <div><strong>OpenGraph Tags:</strong> ${Object.keys(urlData.og_tags || {}).length} found</div>
-                                <div><strong>Twitter Cards:</strong> ${Object.keys(urlData.twitter_tags || {}).length} found</div>
+                                <div><strong>Etiquetas OpenGraph:</strong> ${Object.keys(urlData.og_tags || {}).length} encontradas</div>
+                                <div><strong>Twitter Cards:</strong> ${Object.keys(urlData.twitter_tags || {}).length} encontradas</div>
                             </div>
                             ${Object.keys(urlData.og_tags || {}).length > 0 ? `
                                 <div class="details-subsection">
-                                    <h5>OpenGraph Tags:</h5>
+                                    <h5>Etiquetas OpenGraph:</h5>
                                     ${Object.entries(urlData.og_tags || {}).map(([key, value]) =>
                                         `<div><strong>og:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
                                     ).join('')}
@@ -1977,32 +1977,32 @@ function showUrlDetails(url) {
                         </div>
 
                         <div class="details-section">
-                            <h4>🔗 Links & Structure</h4>
+                            <h4>🔗 Enlaces y estructura</h4>
                             <div class="details-grid">
-                                <div><strong>Internal Links:</strong> ${urlData.internal_links || 0}</div>
-                                <div><strong>External Links:</strong> ${urlData.external_links || 0}</div>
-                                <div><strong>Images:</strong> ${(urlData.images || []).length}</div>
-                                <div><strong>H2 Tags:</strong> ${(urlData.h2 || []).length}</div>
-                                <div><strong>H3 Tags:</strong> ${(urlData.h3 || []).length}</div>
+                                <div><strong>Enlaces internos:</strong> ${urlData.internal_links || 0}</div>
+                                <div><strong>Enlaces externos:</strong> ${urlData.external_links || 0}</div>
+                                <div><strong>Imágenes:</strong> ${(urlData.images || []).length}</div>
+                                <div><strong>Etiquetas H2:</strong> ${(urlData.h2 || []).length}</div>
+                                <div><strong>Etiquetas H3:</strong> ${(urlData.h3 || []).length}</div>
                             </div>
                         </div>
 
                         <div class="details-section">
                             <h4>⚡ Performance</h4>
                             <div class="details-grid">
-                                <div><strong>Status Code:</strong> ${urlData.status_code}${urlData.error_type ? ' (' + escapeHtml(getStatusCodeText(parseInt(urlData.status_code) || 0, urlData.error_type)) + ')' : ''}</div>
-                                <div><strong>Response Time:</strong> ${urlData.response_time || 0}ms</div>
-                                <div><strong>Content Type:</strong> ${safeContentType}</div>
-                                <div><strong>Size:</strong> ${urlData.size || 0} bytes</div>
+                                <div><strong>Código de estado:</strong> ${urlData.status_code}${urlData.error_type ? ' (' + escapeHtml(getStatusCodeText(parseInt(urlData.status_code) || 0, urlData.error_type)) + ')' : ''}</div>
+                                <div><strong>Tiempo de respuesta:</strong> ${urlData.response_time || 0}ms</div>
+                                <div><strong>Tipo de contenido:</strong> ${safeContentType}</div>
+                                <div><strong>Tamaño:</strong> ${urlData.size || 0} bytes</div>
                                 ${urlData.error ? `<div><strong>Error:</strong> ${escapeHtml(urlData.error)}</div>` : ''}
                             </div>
                         </div>
 
                         ${(urlData.linked_from && urlData.linked_from.length > 0) ? `
                         <div class="details-section">
-                            <h4>🔗 Linked From</h4>
+                            <h4>🔗 Enlazada desde</h4>
                             <div class="details-grid">
-                                <div><strong>Found on ${urlData.linked_from.length} page${urlData.linked_from.length !== 1 ? 's' : ''}:</strong></div>
+                                <div><strong>Encontrada en ${urlData.linked_from.length} página${urlData.linked_from.length !== 1 ? 's' : ''}:</strong></div>
                             </div>
                             <div class="details-subsection">
                                 <ul style="list-style: none; padding: 0; margin: 10px 0;">
@@ -2010,21 +2010,21 @@ function showUrlDetails(url) {
                                         const escapedUrl = escapeHtml(sourceUrl);
                                         return `<li style="padding: 5px 0; word-break: break-all;"><a href="${escapedUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${escapedUrl}</a></li>`;
                                     }).join('')}
-                                    ${urlData.linked_from.length > 20 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... and ${urlData.linked_from.length - 20} more</li>` : ''}
+                                    ${urlData.linked_from.length > 20 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... y ${urlData.linked_from.length - 20} más</li>` : ''}
                                 </ul>
                             </div>
                         </div>
                         ` : ''}
 
                         <div class="details-section">
-                            <h4>🏗️ Structured Data</h4>
+                            <h4>🏗️ Datos estructurados</h4>
                             <div class="details-grid">
-                                <div><strong>JSON-LD Scripts:</strong> ${(urlData.json_ld || []).length}</div>
-                                <div><strong>Schema.org Items:</strong> ${(urlData.schema_org || []).length}</div>
+                                <div><strong>Scripts JSON-LD:</strong> ${(urlData.json_ld || []).length}</div>
+                                <div><strong>Elementos Schema.org:</strong> ${(urlData.schema_org || []).length}</div>
                             </div>
                             ${(urlData.json_ld || []).length > 0 ? `
                                 <div class="details-subsection">
-                                    <h5>JSON-LD Data:</h5>
+                                    <h5>Datos JSON-LD:</h5>
                                     <pre class="json-preview">${escapeHtml(JSON.stringify(urlData.json_ld, null, 2))}</pre>
                                 </div>
                             ` : ''}
@@ -2064,12 +2064,12 @@ function displayPageSpeedResults(results) {
         pageCard.innerHTML = `
             <div class="pagespeed-page-header">
                 <h4 class="pagespeed-page-url">${pageResult.url}</h4>
-                <span class="pagespeed-analysis-date">Analyzed: ${pageResult.analysis_date}</span>
+                <span class="pagespeed-analysis-date">Analizado: ${pageResult.analysis_date}</span>
             </div>
 
             <div class="pagespeed-results-grid">
                 <div class="pagespeed-device-result">
-                    <h5>📱 Mobile</h5>
+                    <h5>📱 Móvil</h5>
                     ${mobile.success ? `
                         <div class="pagespeed-score ${getScoreClass(mobile.performance_score)}">
                             ${mobile.performance_score || 'N/A'}
@@ -2098,13 +2098,13 @@ function displayPageSpeedResults(results) {
                         </div>
                     ` : `
                         <div class="pagespeed-error">
-                            Error: ${mobile.error || 'Analysis failed'}
+                            Error: ${mobile.error || 'El análisis ha fallado'}
                         </div>
                     `}
                 </div>
 
                 <div class="pagespeed-device-result">
-                    <h5>🖥️ Desktop</h5>
+                    <h5>🖥️ Escritorio</h5>
                     ${desktop.success ? `
                         <div class="pagespeed-score ${getScoreClass(desktop.performance_score)}">
                             ${desktop.performance_score || 'N/A'}
@@ -2133,7 +2133,7 @@ function displayPageSpeedResults(results) {
                         </div>
                     ` : `
                         <div class="pagespeed-error">
-                            Error: ${desktop.error || 'Analysis failed'}
+                            Error: ${desktop.error || 'El análisis ha fallado'}
                         </div>
                     `}
                 </div>
@@ -2155,7 +2155,7 @@ function getScoreClass(score) {
 async function saveCrawl() {
     try {
         if (crawlState.stats.crawled === 0) {
-            showNotification('No crawl data to save', 'error');
+            showNotification('No hay datos de rastreo para guardar', 'error');
             return;
         }
 
@@ -2210,11 +2210,11 @@ async function saveCrawl() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
 
-        showNotification('Crawl saved successfully', 'success');
+        showNotification('Rastreo guardado correctamente', 'success');
 
     } catch (error) {
         console.error('Save error:', error);
-        showNotification('Failed to save crawl', 'error');
+        showNotification('No se pudo guardar el rastreo', 'error');
     }
 }
 
@@ -2235,7 +2235,7 @@ function loadCrawl() {
 
             // Validate save data
             if (!saveData.version || !saveData.urls || !saveData.stats) {
-                showNotification('Invalid crawl file format', 'error');
+                showNotification('Formato de archivo de rastreo no válido', 'error');
                 return;
             }
 
@@ -2318,14 +2318,14 @@ function loadCrawl() {
                         updateIssuesTable(filteredIssues);
                     } else {
                         // Update the badge count even if tab is not active
-                        const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+                        const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Incidencias'));
                         if (issuesTabButton) {
                             const errorCount = filteredIssues.filter(i => i.type === 'error').length;
                             const warningCount = filteredIssues.filter(i => i.type === 'warning').length;
                             let badgeColor = '#3b82f6';
                             if (errorCount > 0) badgeColor = '#ef4444';
                             else if (warningCount > 0) badgeColor = '#f59e0b';
-                            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(filteredIssues.length)}</span>`;
+                            issuesTabButton.innerHTML = `Incidencias <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${formatNumber(filteredIssues.length)}</span>`;
                         }
                     }
                 } catch (error) {
@@ -2374,11 +2374,11 @@ function loadCrawl() {
                 });
             }
 
-            showNotification(`Crawl loaded: ${saveData.stats.crawled} URLs from ${new Date(saveData.timestamp).toLocaleDateString()}`, 'success');
+            showNotification(`Rastreo cargado: ${saveData.stats.crawled} URLs de ${new Date(saveData.timestamp).toLocaleDateString()}`, 'success');
 
         } catch (error) {
             console.error('Load error:', error);
-            showNotification('Failed to load crawl file', 'error');
+            showNotification('No se pudo cargar el archivo de rastreo', 'error');
         }
     });
 
@@ -2409,12 +2409,12 @@ function renderOverviewRow(row, urlData, index) {
         urlData.word_count || 0,
         urlData.response_time || 0,
         analyticsInfo,
-        ogTagsCount > 0 ? `${ogTagsCount} tags` : '',
+        ogTagsCount > 0 ? `${ogTagsCount} etiquetas` : '',
         jsonLdCount > 0 ? `${jsonLdCount} scripts` : '',
         linksInfo,
-        imagesCount > 0 ? `${imagesCount} images` : '',
+        imagesCount > 0 ? `${imagesCount} imágenes` : '',
         jsRendered,
-        `<button class="details-btn" onclick="showUrlDetails('${urlData.url.replace(/'/g, "\\'")}')">📊 Details</button>`
+        `<button class="details-btn" onclick="showUrlDetails('${urlData.url.replace(/'/g, "\\'")}')">📊 Detalles</button>`
     ];
 
     cells.forEach(cellData => {
@@ -2462,7 +2462,7 @@ function renderExternalRow(row, urlData, index) {
 
 function renderInternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
-    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Desconocida';
 
     row.innerHTML = `
         <td style="word-break: break-all;">${link.source_url}</td>
@@ -2475,7 +2475,7 @@ function renderInternalLinkRow(row, link, index) {
 
 function renderExternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
-    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Desconocida';
 
     row.innerHTML = `
         <td style="word-break: break-all;">${link.source_url}</td>
@@ -2512,9 +2512,11 @@ function renderIssueRow(row, issue, index) {
         typeColor = '#3b82f6';
     }
 
+    const typeLabel = issue.type === 'error' ? 'Error' : issue.type === 'warning' ? 'Aviso' : 'Info';
+
     row.innerHTML = `
         <td style="word-break: break-all;" title="${issue.url}">${issue.url}</td>
-        <td><span style="color: ${typeColor};">${typeIcon}</span> ${issue.type}</td>
+        <td><span style="color: ${typeColor};">${typeIcon}</span> ${typeLabel}</td>
         <td>${issue.category}</td>
         <td>${issue.issue}</td>
         <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>

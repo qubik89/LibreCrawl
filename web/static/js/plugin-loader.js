@@ -298,8 +298,8 @@ class PluginLoader {
                 console.error(`Error in ${plugin.name}.onTabActivate():`, error);
                 container.innerHTML = `
                     <div class="empty-state">
-                        <h3>Plugin Error</h3>
-                        <p>Failed to load plugin content. Check console for details.</p>
+                        <h3>Error del plugin</h3>
+                        <p>No se pudo cargar el contenido del plugin. Revisa la consola para más detalles.</p>
                     </div>
                 `;
             }

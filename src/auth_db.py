@@ -148,13 +148,13 @@ def create_user(username, email, password):
             return False, "All fields are required", None
 
         if len(username) < 3:
-            return False, "Username must be at least 3 characters", None
+            return False, "El usuario debe tener al menos 3 caracteres", None
 
         if len(password) < 8:
-            return False, "Password must be at least 8 characters", None
+            return False, "La contraseña debe tener al menos 8 caracteres", None
 
         if '@' not in email:
-            return False, "Invalid email address", None
+            return False, "Correo electrónico no válido", None
 
         # Hash the password
         password_hash = hash_password(password)
@@ -175,7 +175,7 @@ def create_user(username, email, password):
 
             if existing:
                 if existing['verified'] == 1:
-                    return False, "Email already registered and verified", None
+                    return False, "Este correo ya está registrado y verificado", None
                 else:
                     # Update unverified account with new username and password
                     cursor.execute('''
@@ -191,16 +191,16 @@ def create_user(username, email, password):
                 VALUES (?, ?, ?, 0)
             ''', (username, email, password_hash))
 
-            return True, "Registration successful! Please wait for admin verification.", cursor.lastrowid
+            return True, "Registro completado. Espera la verificación del administrador.", cursor.lastrowid
 
     except sqlite3.IntegrityError as e:
         if 'username' in str(e):
-            return False, "Username already exists", None
+            return False, "El usuario ya existe", None
         else:
-            return False, "Registration failed", None
+            return False, "El registro ha fallado", None
     except Exception as e:
         print(f"Registration error: {e}")
-        return False, "An error occurred during registration", None
+        return False, "Se ha producido un error durante el registro", None
 
 def authenticate_user(username, password):
     """
@@ -226,15 +226,15 @@ def authenticate_user(username, password):
             user = cursor.fetchone()
 
             if not user:
-                return False, "Invalid username or password", None
+                return False, "Usuario o contraseña no válidos", None
 
             # Check if password is correct
             if not verify_password(password, user['password_hash']):
-                return False, "Invalid username or password", None
+                return False, "Usuario o contraseña no válidos", None
 
             # Check if user is verified
             if user['verified'] != 1:
-                return False, "Account not verified yet. Please wait for admin approval.", None
+                return False, "La cuenta aún no está verificada. Espera la aprobación del administrador.", None
 
             # Update last login time
             cursor.execute('''
@@ -250,11 +250,11 @@ def authenticate_user(username, password):
                 'tier': user['tier'] or 'guest'
             }
 
-            return True, "Login successful", user_data
+            return True, "Acceso correcto", user_data
 
     except Exception as e:
         print(f"Authentication error: {e}")
-        return False, "An error occurred during login", None
+        return False, "Se ha producido un error durante el acceso", None
 
 def get_user_by_id(user_id):
     """Get user information by ID"""
@@ -333,7 +333,7 @@ def verify_user(user_id):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE users SET verified = 1 WHERE id = ?', (user_id,))
-        return True, "User verified successfully"
+        return True, "Usuario verificado correctamente"
     except Exception as e:
         print(f"Error verifying user: {e}")
         return False, str(e)
@@ -404,7 +404,7 @@ def set_user_tier(user_id, tier):
     """Set tier for a user (guest, user, extra, admin)"""
     valid_tiers = ['guest', 'user', 'extra', 'admin']
     if tier not in valid_tiers:
-        return False, f"Invalid tier. Must be one of: {', '.join(valid_tiers)}"
+        return False, f"Nivel no válido. Debe ser uno de: {', '.join(valid_tiers)}"
 
     try:
         if metadata_postgres_enabled():
@@ -601,15 +601,15 @@ def verify_token(token):
             result = cursor.fetchone()
 
             if not result:
-                return False, "Invalid verification link", None, None
+                return False, "Enlace de verificación no válido", None, None
 
             if result['used']:
-                return False, "This verification link has already been used", None, None
+                return False, "Este enlace de verificación ya se ha usado", None, None
 
             # Check if expired
             expires_at = datetime.fromisoformat(result['expires_at'])
             if datetime.now() > expires_at:
-                return False, "This verification link has expired", None, None
+                return False, "Este enlace de verificación ha caducado", None, None
 
             # Mark user as verified
             cursor.execute('''
@@ -623,11 +623,11 @@ def verify_token(token):
 
             conn.commit()
 
-            return True, "Email verified successfully!", result['app_source'], result['email']
+            return True, "Correo verificado correctamente", result['app_source'], result['email']
 
     except Exception as e:
         print(f"Error verifying token: {e}")
-        return False, "An error occurred during verification", None, None
+        return False, "Se ha producido un error durante la verificación", None, None
 
 def get_user_by_email(email):
     """Get user information by email"""

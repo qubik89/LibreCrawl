@@ -15,11 +15,11 @@ MitmoreSEOCrawlPlugin.register({
     id: 'example-plugin',
 
     // Display name
-    name: 'Example Plugin',
+    name: 'Plugin de ejemplo',
 
     // Tab configuration
     tab: {
-        label: 'Example',      // Text shown on tab button
+        label: 'Ejemplo',      // Text shown on tab button
         icon: '🔥',            // Optional emoji icon
         position: 'end'        // Position: 'end' or number (0 = first tab)
     },
@@ -29,8 +29,8 @@ MitmoreSEOCrawlPlugin.register({
     // ==========================================
 
     version: '1.0.0',
-    author: 'Your Name',
-    description: 'A brief description of what your plugin does',
+    author: 'Tu nombre',
+    description: 'Una breve descripción de lo que hace tu plugin',
 
     // ==========================================
     // LIFECYCLE HOOKS
@@ -90,7 +90,7 @@ MitmoreSEOCrawlPlugin.register({
         console.log('Crawl completed!', data.urls.length, 'URLs total');
 
         // Optionally show notification
-        this.utils.showNotification('Analysis complete!', 'success');
+        this.utils.showNotification('Análisis completado', 'success');
     },
 
     // ==========================================
@@ -117,25 +117,25 @@ MitmoreSEOCrawlPlugin.register({
             <div class="plugin-content" style="padding: 20px; overflow-y: auto; max-height: calc(100vh - 280px);">
                 <div class="plugin-header" style="margin-bottom: 24px;">
                     <h2 style="font-size: 24px; font-weight: 700; color: #e5e7eb;">
-                        🔥 Example Analysis
+                        🔥 Análisis de ejemplo
                     </h2>
                     <p style="color: #9ca3af; font-size: 14px;">
-                        This is an example plugin showing the basic structure
+                        Este es un plugin de ejemplo que muestra la estructura básica
                     </p>
                 </div>
 
                 <div style="background: #1f2937; padding: 20px; border-radius: 12px; border: 1px solid #374151;">
-                    <h3 style="color: #e5e7eb; margin-bottom: 16px;">Summary</h3>
+                    <h3 style="color: #e5e7eb; margin-bottom: 16px;">Resumen</h3>
                     <div style="color: #cbd5e1;">
-                        <p>Total URLs: ${data.urls.length}</p>
-                        <p>Total Links: ${data.links ? data.links.length : 0}</p>
-                        <p>Total Issues: ${data.issues ? data.issues.length : 0}</p>
-                        <p>Custom Analysis Result: ${analysis.result}</p>
+                        <p>URLs totales: ${data.urls.length}</p>
+                        <p>Enlaces totales: ${data.links ? data.links.length : 0}</p>
+                        <p>Incidencias totales: ${data.issues ? data.issues.length : 0}</p>
+                        <p>Resultado del análisis personalizado: ${analysis.result}</p>
                     </div>
                 </div>
 
                 <div style="margin-top: 20px; background: #1f2937; padding: 20px; border-radius: 12px; border: 1px solid #374151;">
-                    <h3 style="color: #e5e7eb; margin-bottom: 16px;">URL List</h3>
+                    <h3 style="color: #e5e7eb; margin-bottom: 16px;">Lista de URLs</h3>
                     <div style="max-height: 400px; overflow-y: auto;">
                         ${this.renderUrlList(data.urls)}
                     </div>
@@ -161,7 +161,7 @@ MitmoreSEOCrawlPlugin.register({
         });
 
         return {
-            result: `Found ${count} successful URLs`,
+            result: `Se encontraron ${count} URLs correctas`,
             count: count
         };
     },
@@ -178,7 +178,7 @@ MitmoreSEOCrawlPlugin.register({
                     ${this.utils.escapeHtml(url.url)}
                 </div>
                 <div style="color: #9ca3af; font-size: 12px;">
-                    Status: ${url.status_code} | Title: ${this.utils.escapeHtml(url.title || 'N/A')}
+                    Estado: ${url.status_code} | Título: ${this.utils.escapeHtml(url.title || 'N/A')}
                 </div>
             </div>
         `).join('');
@@ -194,10 +194,10 @@ MitmoreSEOCrawlPlugin.register({
                 <div style="text-align: center; padding: 60px 20px;">
                     <div style="font-size: 64px; margin-bottom: 20px;">🔥</div>
                     <h3 style="font-size: 24px; color: #e5e7eb; margin-bottom: 12px;">
-                        No Data Yet
+                        Aún no hay datos
                     </h3>
                     <p style="color: #9ca3af; font-size: 14px;">
-                        Start crawling to see your analysis here
+                        Inicia un rastreo para ver aquí tu análisis
                     </p>
                 </div>
             </div>

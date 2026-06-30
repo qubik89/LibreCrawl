@@ -131,8 +131,8 @@ function setupInteractions() {
         tooltip.innerHTML = `
             <div class="tooltip-url">${truncateUrl(data.url)}</div>
             <div class="tooltip-info">
-                <div><strong>Title:</strong> ${data.title || 'N/A'}</div>
-                <div class="tooltip-status ${statusClass}">Status: ${data.status_code}</div>
+                <div><strong>Título:</strong> ${data.title || 'N/A'}</div>
+                <div class="tooltip-status ${statusClass}">Estado: ${data.status_code}</div>
             </div>
         `;
 
@@ -369,7 +369,7 @@ function exportVisualizationImage() {
     const url = URL.createObjectURL(png);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'site-structure-visualization.png';
+    link.download = 'visualizacion-estructura-sitio.png';
     link.click();
     URL.revokeObjectURL(url);
 }

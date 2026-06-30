@@ -9,10 +9,10 @@
 MitmoreSEOCrawlPlugin.register({
     // Plugin metadata
     id: 'e-e-a-t',
-    name: 'E-E-A-T Analyzer',
+    name: 'Analizador E-E-A-T',
     version: '1.0.0',
-    author: 'Mitmore SEO Crawl Community',
-    description: 'Analyzes Experience, Expertise, Authoritativeness, Trust (E-E-A-T) signals on your website',
+    author: 'Comunidad Mitmore SEO Crawl',
+    description: 'Analiza señales de experiencia, conocimiento, autoridad y confianza (E-E-A-T) en tu sitio web',
 
     // Tab configuration
     tab: {
@@ -76,10 +76,10 @@ MitmoreSEOCrawlPlugin.register({
         return `
             <div class="plugin-header" style="margin-bottom: 32px;">
                 <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #e5e7eb;">
-                    🎓 E-E-A-T Analysis
+                    🎓 Análisis E-E-A-T
                 </h2>
                 <p style="color: #9ca3af; font-size: 14px;">
-                    Experience, Expertise, Authoritativeness, and Trust signals across your website
+                    Señales de experiencia, conocimiento, autoridad y confianza en tu sitio web
                 </p>
             </div>
         `;
@@ -94,49 +94,49 @@ MitmoreSEOCrawlPlugin.register({
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 32px;">
                 <div class="stat-card" style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151;">
                     <div style="font-size: 14px; color: #9ca3af; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
-                        Overall E-E-A-T Score
+                        Puntuación E-E-A-T global
                     </div>
                     <div style="font-size: 48px; font-weight: 700; color: ${scoreColor}; margin-bottom: 8px;">
                         ${analysis.overallScore}
                     </div>
                     <div style="font-size: 13px; color: #6b7280;">
-                        Out of 100
+                        Sobre 100
                     </div>
                 </div>
 
                 <div class="stat-card" style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151;">
                     <div style="font-size: 14px; color: #9ca3af; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
-                        Pages with Author Info
+                        Páginas con autoría
                     </div>
                     <div style="font-size: 48px; font-weight: 700; color: #10b981; margin-bottom: 8px;">
                         ${analysis.pagesWithAuthor}
                     </div>
                     <div style="font-size: 13px; color: #6b7280;">
-                        ${this.getPercentage(analysis.pagesWithAuthor, analysis.totalPages)}% of pages
+                        ${this.getPercentage(analysis.pagesWithAuthor, analysis.totalPages)}% de páginas
                     </div>
                 </div>
 
                 <div class="stat-card" style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151;">
                     <div style="font-size: 14px; color: #9ca3af; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
-                        Pages with Schema Markup
+                        Páginas con marcado Schema
                     </div>
                     <div style="font-size: 48px; font-weight: 700; color: #3b82f6; margin-bottom: 8px;">
                         ${analysis.pagesWithSchema}
                     </div>
                     <div style="font-size: 13px; color: #6b7280;">
-                        ${this.getPercentage(analysis.pagesWithSchema, analysis.totalPages)}% of pages
+                        ${this.getPercentage(analysis.pagesWithSchema, analysis.totalPages)}% de páginas
                     </div>
                 </div>
 
                 <div class="stat-card" style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151;">
                     <div style="font-size: 14px; color: #9ca3af; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;">
-                        External Citations
+                        Citas externas
                     </div>
                     <div style="font-size: 48px; font-weight: 700; color: #f59e0b; margin-bottom: 8px;">
                         ${analysis.externalCitations}
                     </div>
                     <div style="font-size: 13px; color: #6b7280;">
-                        Average ${analysis.avgExternalLinks.toFixed(1)} per page
+                        Media de ${analysis.avgExternalLinks.toFixed(1)} por página
                     </div>
                 </div>
             </div>
@@ -148,15 +148,15 @@ MitmoreSEOCrawlPlugin.register({
         return `
             <div style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151; margin-bottom: 32px;">
                 <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #e5e7eb;">
-                    Trust Signals Breakdown
+                    Desglose de señales de confianza
                 </h3>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-                    ${this.renderSignalItem('✍️', 'Author Attribution', analysis.pagesWithAuthor, analysis.totalPages)}
-                    ${this.renderSignalItem('📊', 'Structured Data', analysis.pagesWithSchema, analysis.totalPages)}
-                    ${this.renderSignalItem('🔗', 'External Links', analysis.pagesWithExternalLinks, analysis.totalPages)}
-                    ${this.renderSignalItem('🏷️', 'Open Graph Tags', analysis.pagesWithOGTags, analysis.totalPages)}
-                    ${this.renderSignalItem('🔒', 'HTTPS Secure', analysis.securePages, analysis.totalPages)}
-                    ${this.renderSignalItem('📝', 'Sufficient Content', analysis.pagesWithGoodContent, analysis.totalPages)}
+                    ${this.renderSignalItem('✍️', 'Autoría', analysis.pagesWithAuthor, analysis.totalPages)}
+                    ${this.renderSignalItem('📊', 'Datos estructurados', analysis.pagesWithSchema, analysis.totalPages)}
+                    ${this.renderSignalItem('🔗', 'Enlaces externos', analysis.pagesWithExternalLinks, analysis.totalPages)}
+                    ${this.renderSignalItem('🏷️', 'Etiquetas Open Graph', analysis.pagesWithOGTags, analysis.totalPages)}
+                    ${this.renderSignalItem('🔒', 'HTTPS seguro', analysis.securePages, analysis.totalPages)}
+                    ${this.renderSignalItem('📝', 'Contenido suficiente', analysis.pagesWithGoodContent, analysis.totalPages)}
                 </div>
             </div>
         `;
@@ -191,17 +191,17 @@ MitmoreSEOCrawlPlugin.register({
         return `
             <div style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151; margin-bottom: 32px;">
                 <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #e5e7eb;">
-                    Top Pages by E-E-A-T Score
+                    Páginas principales por puntuación E-E-A-T
                 </h3>
                 <div style="overflow-x: auto;">
                     <table class="data-table" style="width: 100%; border-collapse: collapse;">
                         <thead>
                             <tr style="border-bottom: 1px solid #374151;">
                                 <th style="padding: 12px; text-align: left; color: #9ca3af; font-size: 13px; font-weight: 600;">URL</th>
-                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Score</th>
-                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Author</th>
+                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Puntuación</th>
+                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Autoría</th>
                                 <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Schema</th>
-                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Ext. Links</th>
+                                <th style="padding: 12px; text-align: center; color: #9ca3af; font-size: 13px; font-weight: 600;">Enlaces ext.</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -244,7 +244,7 @@ MitmoreSEOCrawlPlugin.register({
         return `
             <div style="background: #1f2937; padding: 24px; border-radius: 12px; border: 1px solid #374151;">
                 <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #e5e7eb;">
-                    💡 Recommendations to Improve E-E-A-T
+                    💡 Recomendaciones para mejorar E-E-A-T
                 </h3>
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                     ${recommendations.map(rec => this.renderRecommendation(rec)).join('')}
@@ -260,6 +260,11 @@ MitmoreSEOCrawlPlugin.register({
             medium: '#f59e0b',
             low: '#3b82f6'
         };
+        const priorityLabels = {
+            high: 'alta',
+            medium: 'media',
+            low: 'baja'
+        };
 
         return `
             <div style="background: #0f172a; padding: 16px; border-radius: 8px; border-left: 4px solid ${priorityColors[rec.priority]};">
@@ -274,7 +279,7 @@ MitmoreSEOCrawlPlugin.register({
                         </div>
                     </div>
                     <div style="background: ${priorityColors[rec.priority]}20; color: ${priorityColors[rec.priority]}; padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase;">
-                        ${rec.priority}
+                        ${priorityLabels[rec.priority] || rec.priority}
                     </div>
                 </div>
             </div>
@@ -288,10 +293,10 @@ MitmoreSEOCrawlPlugin.register({
                 <div class="empty-state" style="text-align: center; padding: 60px 20px;">
                     <div style="font-size: 64px; margin-bottom: 20px;">🎓</div>
                     <h3 style="font-size: 24px; font-weight: 600; color: #e5e7eb; margin-bottom: 12px;">
-                        No Data Yet
+                        Aún no hay datos
                     </h3>
                     <p style="color: #9ca3af; font-size: 14px;">
-                        Start crawling to analyze E-E-A-T signals on your website
+                        Inicia un rastreo para analizar señales E-E-A-T en tu sitio web
                     </p>
                 </div>
             </div>
@@ -395,8 +400,8 @@ MitmoreSEOCrawlPlugin.register({
         if (analysis.pagesWithAuthor < total * 0.5) {
             recommendations.push({
                 icon: '✍️',
-                title: 'Add Author Information',
-                description: `Only ${analysis.pagesWithAuthor} out of ${total} pages have author information. Add author bylines with credentials to demonstrate expertise.`,
+                title: 'Añade información de autoría',
+                description: `Solo ${analysis.pagesWithAuthor} de ${total} páginas tienen información de autoría. Añade firmas de autor con credenciales para demostrar conocimiento.`,
                 priority: 'high'
             });
         }
@@ -405,8 +410,8 @@ MitmoreSEOCrawlPlugin.register({
         if (analysis.pagesWithSchema < total * 0.3) {
             recommendations.push({
                 icon: '📊',
-                title: 'Implement Structured Data',
-                description: `${analysis.pagesWithSchema} pages have schema markup. Add JSON-LD structured data (Article, Person, Organization schemas) to improve E-E-A-T.`,
+                title: 'Implementa datos estructurados',
+                description: `${analysis.pagesWithSchema} páginas tienen marcado Schema. Añade datos estructurados JSON-LD (Article, Person, Organization) para mejorar E-E-A-T.`,
                 priority: 'high'
             });
         }
@@ -415,8 +420,8 @@ MitmoreSEOCrawlPlugin.register({
         if (analysis.avgExternalLinks < 2) {
             recommendations.push({
                 icon: '🔗',
-                title: 'Add External Citations',
-                description: `Average of ${analysis.avgExternalLinks.toFixed(1)} external links per page. Link to authoritative sources to support your claims and demonstrate research.`,
+                title: 'Añade citas externas',
+                description: `Media de ${analysis.avgExternalLinks.toFixed(1)} enlaces externos por página. Enlaza fuentes autorizadas para respaldar tus afirmaciones y demostrar investigación.`,
                 priority: 'medium'
             });
         }
@@ -425,8 +430,8 @@ MitmoreSEOCrawlPlugin.register({
         if (analysis.pagesWithGoodContent < total * 0.7) {
             recommendations.push({
                 icon: '📝',
-                title: 'Improve Content Depth',
-                description: `${analysis.pagesWithGoodContent} pages have sufficient content (300+ words). Create comprehensive, in-depth content to demonstrate expertise.`,
+                title: 'Mejora la profundidad del contenido',
+                description: `${analysis.pagesWithGoodContent} páginas tienen contenido suficiente (300+ palabras). Crea contenido completo y profundo para demostrar conocimiento.`,
                 priority: 'medium'
             });
         }
@@ -435,8 +440,8 @@ MitmoreSEOCrawlPlugin.register({
         if (analysis.securePages < total) {
             recommendations.push({
                 icon: '🔒',
-                title: 'Enable HTTPS Everywhere',
-                description: `${total - analysis.securePages} pages are not using HTTPS. Ensure all pages use HTTPS for trust and security.`,
+                title: 'Activa HTTPS en todas partes',
+                description: `${total - analysis.securePages} páginas no usan HTTPS. Asegúrate de que todas las páginas usen HTTPS por confianza y seguridad.`,
                 priority: 'high'
             });
         }
@@ -445,8 +450,8 @@ MitmoreSEOCrawlPlugin.register({
         if (recommendations.length === 0) {
             recommendations.push({
                 icon: '🎉',
-                title: 'Great E-E-A-T Signals!',
-                description: 'Your website demonstrates strong Experience, Expertise, Authoritativeness, and Trust signals. Keep up the good work!',
+                title: 'Buenas señales E-E-A-T',
+                description: 'Tu sitio muestra señales sólidas de experiencia, conocimiento, autoridad y confianza. Mantén esta línea.',
                 priority: 'low'
             });
         }

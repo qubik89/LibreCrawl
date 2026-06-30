@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Mitmore SEO Crawl</title>
+    <title>Acceso - Mitmore SEO Crawl</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -169,42 +169,42 @@
     <div class="login-container">
         <div class="logo">
             <h1>Mitmore SEO Crawl</h1>
-            <p>SEO Spider Tool</p>
+            <p>Herramienta SEO Spider</p>
         </div>
 
         <div id="alert" class="alert"></div>
 
         {% if skip_auth %}
         <div class="alert alert-error show" style="text-align: left;">
-            <strong>⚠️ Authentication is disabled.</strong>
-            Anyone can log in as any username with no password.
-            The username is only used to separate sessions.
+            <strong>⚠️ La autenticación está desactivada.</strong>
+            Cualquiera puede entrar con cualquier usuario sin contraseña.
+            El usuario solo se usa para separar sesiones.
         </div>
         {% endif %}
 
         <form id="loginForm">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username">Usuario</label>
                 <input type="text" id="username" name="username" required autofocus maxlength="50">
             </div>
 
             {% if not skip_auth %}
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password">Contraseña</label>
                 <input type="password" id="password" name="password" required>
             </div>
             {% endif %}
 
-            <button type="submit" class="btn" id="loginBtn">{{ 'Continue' if skip_auth else 'Login' }}</button>
+            <button type="submit" class="btn" id="loginBtn">{{ 'Continuar' if skip_auth else 'Entrar' }}</button>
         </form>
 
         {% if not guest_disabled and not skip_auth %}
-        <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
+        <button class="btn btn-guest" id="guestBtn">Continuar como invitado (3 rastreos/24h)</button>
         {% endif %}
 
         {% if not registration_disabled and not skip_auth %}
         <div class="register-link">
-            Don't have an account? <a href="/register" id="registerLink">Register here</a>
+            ¿No tienes cuenta? <a href="/register" id="registerLink">Regístrate aquí</a>
         </div>
         {% endif %}
     </div>
@@ -234,7 +234,7 @@
             const password = passwordEl ? passwordEl.value : '';
 
             loginBtn.disabled = true;
-            loginBtn.textContent = skipAuth ? 'Continuing...' : 'Logging in...';
+            loginBtn.textContent = skipAuth ? 'Continuando...' : 'Entrando...';
 
             try {
                 const response = await fetch('/api/login', {
@@ -258,7 +258,7 @@
                     loginBtn.textContent = defaultLoginText;
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert('Se ha producido un error. Inténtalo de nuevo.', 'error');
                 loginBtn.disabled = false;
                 loginBtn.textContent = defaultLoginText;
             }
@@ -283,19 +283,19 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    showAlert('Entering as guest...', 'success');
+            showAlert('Entrando como invitado...', 'success');
                     setTimeout(() => {
                         window.location.href = '/';
                     }, 500);
                 } else {
-                    showAlert(data.message || 'Failed to enter as guest', 'error');
+                    showAlert(data.message || 'No se pudo entrar como invitado', 'error');
                     guestBtn.disabled = false;
-                    guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
+                    guestBtn.textContent = 'Continuar como invitado (3 rastreos/24h)';
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert('Se ha producido un error. Inténtalo de nuevo.', 'error');
                 guestBtn.disabled = false;
-                guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
+                guestBtn.textContent = 'Continuar como invitado (3 rastreos/24h)';
             }
         });
         {% endif %}
@@ -307,7 +307,7 @@
         if (registrationDisabled && registerLink) {
             registerLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                window.alert('Registrations are disabled');
+                window.alert('Los registros están desactivados');
             });
         }
     </script>

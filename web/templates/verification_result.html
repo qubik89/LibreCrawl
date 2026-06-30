@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Verification - Mitmore SEO Crawl</title>
+    <title>Verificación de correo electrónico - Mitmore SEO Crawl</title>
     <style>
         * {
             margin: 0;
@@ -103,19 +103,19 @@
     <div class="container">
         {% if success %}
         <div class="icon success">✓</div>
-        <h1>Email Verified!</h1>
+        <h1>¡Correo verificado!</h1>
         <p class="message">{{ message }}</p>
         {% if redirect_url %}
-        <a href="{{ redirect_url }}" class="button">Go to {{ 'Workshop' if app_source == 'workshop' else 'Mitmore SEO Crawl' }}</a>
-        <p class="auto-redirect">Redirecting automatically in <span id="countdown">5</span> seconds<span class="spinner"></span></p>
+        <a href="{{ redirect_url }}" class="button">Ir a {{ 'Workshop' if app_source == 'workshop' else 'Mitmore SEO Crawl' }}</a>
+        <p class="auto-redirect">Redirigiendo automáticamente en <span id="countdown">5</span> segundos<span class="spinner"></span></p>
         {% else %}
-        <a href="{{ url_for('login_page') }}" class="button">Go to Login</a>
+        <a href="{{ url_for('login_page') }}" class="button">Ir al acceso</a>
         {% endif %}
         {% else %}
         <div class="icon error">✗</div>
-        <h1>Verification Failed</h1>
+        <h1>La verificación ha fallado</h1>
         <p class="message">{{ message }}</p>
-        <a href="{{ url_for('login_page') }}" class="button">Go to Login</a>
+        <a href="{{ url_for('login_page') }}" class="button">Ir al acceso</a>
         {% endif %}
     </div>
 
