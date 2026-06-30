@@ -286,6 +286,7 @@ class WebCrawler:
             'max_file_size': 50 * 1024 * 1024,
             'concurrency': 20,
             'persist_links': True,
+            'retain_link_state': True,
             'link_placements': None,
             'max_links_per_page': 0,
             'html_process_workers': 0,
@@ -450,7 +451,10 @@ class WebCrawler:
             requests_per_second = 100.0
 
         self.rate_limiter = RateLimiter(requests_per_second)
-        self.link_manager = LinkManager(self.base_domain)
+        self.link_manager = LinkManager(
+            self.base_domain,
+            retain_link_state=self.config.get('retain_link_state', True),
+        )
         self.sitemap_parser = SitemapParser(self.session, self.base_domain, self.config['timeout'])
         self.issue_detector = IssueDetector(self.config.get('issue_exclusion_patterns', []))
 
@@ -615,7 +619,10 @@ class WebCrawler:
                     self.link_manager.visited_urls.add(url)
 
             # Load links and restore to link manager
-            loaded_links = load_crawl_links(crawl_id) if self.config.get('persist_links', True) else []
+            loaded_links = load_crawl_links(crawl_id) if (
+                self.config.get('persist_links', True)
+                and self.config.get('retain_link_state', True)
+            ) else []
             if loaded_links:
                 self.link_manager.all_links = loaded_links
                 # Rebuild links_set for duplicate detection
@@ -954,6 +961,10 @@ class WebCrawler:
         self.config['persist_links'] = _env_bool(
             'CRAWL_PERSIST_LINKS',
             self.config.get('persist_links', True),
+        )
+        self.config['retain_link_state'] = _env_bool(
+            'CRAWL_RETAIN_LINK_STATE',
+            self.config.get('retain_link_state', True),
         )
         self.config['enable_duplication_check'] = _env_bool(
             'CRAWL_ENABLE_DUPLICATION_CHECK',
@@ -1586,6 +1597,8 @@ class WebCrawler:
 
     def _update_all_linked_from(self):
         """Update linked_from field for all crawled URLs based on collected source_pages data"""
+        if not self.config.get('retain_link_state', True):
+            return
         self._log_verbose("Updating linked_from data for all URLs...")
         updated_count = 0
 

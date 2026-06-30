@@ -181,6 +181,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 'CRAWL_CONCURRENCY',
                 'CRAWL_BATCH_SAVE_SIZE',
                 'CRAWL_PERSIST_LINKS',
+                'CRAWL_RETAIN_LINK_STATE',
                 'CRAWL_LINK_PLACEMENTS',
                 'CRAWL_MAX_LINKS_PER_PAGE',
                 'CRAWL_ENABLE_DUPLICATION_CHECK',
@@ -212,6 +213,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             os.environ['CRAWL_CONCURRENCY'] = '50'
             os.environ['CRAWL_BATCH_SAVE_SIZE'] = '500'
             os.environ['CRAWL_PERSIST_LINKS'] = 'false'
+            os.environ['CRAWL_RETAIN_LINK_STATE'] = 'false'
             os.environ['CRAWL_LINK_PLACEMENTS'] = 'body,image'
             os.environ['CRAWL_MAX_LINKS_PER_PAGE'] = '75'
             os.environ['CRAWL_ENABLE_DUPLICATION_CHECK'] = 'false'
@@ -235,6 +237,7 @@ class CrawlerCheckpointTests(unittest.TestCase):
             self.assertEqual(crawler.config['concurrency'], 50)
             self.assertEqual(crawler.batch_save_size, 500)
             self.assertFalse(crawler.config['persist_links'])
+            self.assertFalse(crawler.config['retain_link_state'])
             self.assertEqual(crawler.config['link_placements'], ['body', 'image'])
             self.assertEqual(crawler.config['max_links_per_page'], 75)
             self.assertFalse(crawler.config['enable_duplication_check'])

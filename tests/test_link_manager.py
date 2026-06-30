@@ -123,6 +123,36 @@ class LinkManagerTests(unittest.TestCase):
         self.assertEqual([link['target_status'] for link in links], [200, 404])
         self.assertEqual(manager.get_source_pages('https://example.com/one'), ['https://example.com/source'])
 
+    def test_apply_collected_links_can_skip_memory_retention(self):
+        manager = LinkManager('example.com', retain_link_state=False)
+        candidates = [
+            {
+                'source_url': 'https://example.com/source',
+                'target_url': 'https://example.com/one',
+                'anchor_text': 'One',
+                'is_internal': True,
+                'target_domain': 'example.com',
+                'target_status': None,
+                'placement': 'body',
+            },
+            {
+                'source_url': 'https://example.com/source',
+                'target_url': 'https://example.com/one',
+                'anchor_text': 'Duplicate',
+                'is_internal': True,
+                'target_domain': 'example.com',
+                'target_status': None,
+                'placement': 'body',
+            },
+        ]
+
+        links = manager.apply_collected_links(candidates, {'https://example.com/one': 200})
+
+        self.assertEqual(len(links), 1)
+        self.assertEqual(manager.all_links, [])
+        self.assertEqual(manager.links_set, set())
+        self.assertEqual(manager.get_source_pages('https://example.com/one'), [])
+
 
 if __name__ == '__main__':
     unittest.main()

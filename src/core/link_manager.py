@@ -7,8 +7,9 @@ from collections import deque
 class LinkManager:
     """Manages link discovery, tracking, and extraction"""
 
-    def __init__(self, base_domain):
+    def __init__(self, base_domain, retain_link_state=True):
         self.base_domain = base_domain
+        self.retain_link_state = retain_link_state
         self.visited_urls = set()
         self.discovered_urls = deque()
         self.all_discovered_urls = set()
@@ -18,6 +19,14 @@ class LinkManager:
 
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
+
+    def _remember_source(self, target_url, source_url):
+        if not self.retain_link_state:
+            return
+        if target_url not in self.source_pages:
+            self.source_pages[target_url] = []
+        if source_url not in self.source_pages[target_url]:
+            self.source_pages[target_url].append(source_url)
 
     def extract_links(self, soup, current_url, depth, should_crawl_callback):
         """Extract links from HTML and add to discovery queue"""
@@ -40,10 +49,7 @@ class LinkManager:
             # Thread-safe checking and adding
             with self.urls_lock:
                 # Track source page for this URL
-                if clean_url not in self.source_pages:
-                    self.source_pages[clean_url] = []
-                if current_url not in self.source_pages[clean_url]:
-                    self.source_pages[clean_url].append(current_url)
+                self._remember_source(clean_url, current_url)
 
                 if (clean_url not in self.visited_urls and
                     clean_url not in self.all_discovered_urls and
@@ -65,6 +71,7 @@ class LinkManager:
         allowed_placements = set(allowed_placements or [])
         saved_count = 0
         new_links = []
+        seen_links = set()
 
         for link in links:
             href = link['href'].strip()
@@ -112,18 +119,18 @@ class LinkManager:
 
                 # Track source page for this URL (for "Linked From" feature)
                 with self.urls_lock:
-                    if clean_url not in self.source_pages:
-                        self.source_pages[clean_url] = []
-                    if source_url not in self.source_pages[clean_url]:
-                        self.source_pages[clean_url].append(source_url)
+                    self._remember_source(clean_url, source_url)
 
                 # Thread-safe adding to links collection with duplicate checking
                 with self.links_lock:
                     link_key = f"{link_data['source_url']}|{link_data['target_url']}"
 
-                    if link_key not in self.links_set:
-                        self.links_set.add(link_key)
-                        self.all_links.append(link_data)
+                    duplicate = link_key in (self.links_set if self.retain_link_state else seen_links)
+                    if not duplicate:
+                        seen_links.add(link_key)
+                        if self.retain_link_state:
+                            self.links_set.add(link_key)
+                            self.all_links.append(link_data)
                         new_links.append(link_data)
                         saved_count += 1
                         if max_links and saved_count >= max_links:
@@ -174,9 +181,12 @@ class LinkManager:
 
                 with self.links_lock:
                     link_key = f"{link_data['source_url']}|{link_data['target_url']}"
-                    if link_key not in self.links_set:
-                        self.links_set.add(link_key)
-                        self.all_links.append(link_data)
+                    duplicate = link_key in (self.links_set if self.retain_link_state else seen_links)
+                    if not duplicate:
+                        seen_links.add(link_key)
+                        if self.retain_link_state:
+                            self.links_set.add(link_key)
+                            self.all_links.append(link_data)
                         new_links.append(link_data)
                         saved_count += 1
                         if max_links and saved_count >= max_links:
@@ -190,6 +200,7 @@ class LinkManager:
         """Add links extracted outside this manager and return only newly saved links."""
         status_lookup = status_lookup or {}
         new_links = []
+        seen_links = set()
 
         for candidate in link_candidates:
             link_data = dict(candidate)
@@ -201,17 +212,17 @@ class LinkManager:
             link_data['target_status'] = status_lookup.get(clean_url)
 
             with self.urls_lock:
-                if clean_url not in self.source_pages:
-                    self.source_pages[clean_url] = []
-                if source_url not in self.source_pages[clean_url]:
-                    self.source_pages[clean_url].append(source_url)
+                self._remember_source(clean_url, source_url)
 
             with self.links_lock:
                 link_key = f"{source_url}|{clean_url}"
-                if link_key in self.links_set:
+                duplicate = link_key in (self.links_set if self.retain_link_state else seen_links)
+                if duplicate:
                     continue
-                self.links_set.add(link_key)
-                self.all_links.append(link_data)
+                seen_links.add(link_key)
+                if self.retain_link_state:
+                    self.links_set.add(link_key)
+                    self.all_links.append(link_data)
                 new_links.append(link_data)
                 if max_links and len(new_links) >= max_links:
                     return new_links
@@ -227,10 +238,7 @@ class LinkManager:
                 continue
 
             with self.urls_lock:
-                if clean_url not in self.source_pages:
-                    self.source_pages[clean_url] = []
-                if source_url not in self.source_pages[clean_url]:
-                    self.source_pages[clean_url].append(source_url)
+                self._remember_source(clean_url, source_url)
 
                 if (clean_url not in self.visited_urls and
                     clean_url not in self.all_discovered_urls and
