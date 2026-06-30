@@ -103,7 +103,7 @@ class ReportingApiHelperTest(unittest.TestCase):
 
         response = main.login_required(lambda: {'ok': True})()
 
-        self.assertEqual(response, ({'success': False, 'error': 'Authentication required'}, 401))
+        self.assertEqual(response, ({'success': False, 'error': 'Autenticación requerida'}, 401))
         self.assertEqual(main.session, {})
 
     def test_page_limit_and_offset_are_clamped(self):
@@ -290,6 +290,32 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertNotIn('pdf_path', public)
         self.assertIsNone(public['error'])
         self.assertTrue(public['has_pdf'])
+        self.assertEqual(public['download_url'], '/api/reports/3/download')
+
+    def test_list_crawl_reports_returns_authorized_public_jobs(self):
+        main.session.update({'user_id': 5, 'tier': 'admin', 'session_id': 'session-a'})
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+            'id': 42,
+            'user_id': 5,
+            'session_id': 'session-a',
+        }):
+            with mock.patch('src.reporting_jobs.list_report_jobs_for_crawl', return_value=[{
+                'id': 3,
+                'crawl_id': 42,
+                'status': 'completed',
+                'language': 'es-ES',
+                'tone': 'commercial',
+                'model': 'openai/gpt-4.1',
+                'pdf_path': '/app/data/reports/42/es-es/commercial/report-3.pdf',
+                'error': None,
+                'usage': None,
+            }]):
+                response = main.list_crawl_reports(42)
+
+        self.assertTrue(response['success'])
+        self.assertEqual(response['reports'][0]['tone'], 'commercial')
+        self.assertEqual(response['reports'][0]['download_url'], '/api/reports/3/download')
 
     def test_safe_report_pdf_path_rejects_paths_outside_reports_base(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -309,13 +335,14 @@ class ReportingApiHelperTest(unittest.TestCase):
                 'html': output_dir / 'report-3.html',
                 'pdf': output_dir / 'report-3.pdf',
             }
+            audit_packet = {'crawl_metadata': {'base_url': 'https://example.test'}}
 
             with mock.patch('src.reporting_jobs.update_report_job') as update_job:
                 with mock.patch('src.openrouter_client.OpenRouterClient') as client:
                     with mock.patch('src.openrouter_client.generate_structured_findings', return_value=('findings', {'prompt_tokens': 10})) as findings:
                         with mock.patch('src.openrouter_client.generate_report_markdown', return_value=('# Report', {'completion_tokens': 8})) as markdown:
-                            with mock.patch('src.reporting_data.build_audit_packet', return_value={'crawl_metadata': {'base_url': 'https://example.test'}}):
-                                with mock.patch('src.reporting_pdf.report_output_paths', return_value=paths):
+                            with mock.patch('src.reporting_data.build_audit_packet', return_value=audit_packet):
+                                with mock.patch('src.reporting_pdf.report_output_paths', return_value=paths) as output_paths:
                                     with mock.patch('src.reporting_pdf.render_report_html', return_value='<h1>Report</h1>') as html:
                                         with mock.patch('src.reporting_pdf.render_report_pdf') as pdf:
                                             with mock.patch('src.reporting_settings.get_openrouter_model', return_value={'supported_parameters': []}):
@@ -332,8 +359,14 @@ class ReportingApiHelperTest(unittest.TestCase):
             client.assert_called_once_with('sk-test')
             findings.assert_called_once()
             markdown.assert_called_once()
-            html.assert_called_once()
+            html.assert_called_once_with(
+                '# Report',
+                {'agency_name': 'Agency'},
+                {'base_url': 'https://example.test'},
+                audit_packet=audit_packet,
+            )
             pdf.assert_called_once_with('<h1>Report</h1>', paths['pdf'])
+            output_paths.assert_called_once_with(42, 3, language='en', tone='technical')
             update_job.assert_any_call(3, status='running')
             completed_call = update_job.call_args_list[-1]
             self.assertEqual(completed_call.kwargs['status'], 'completed')

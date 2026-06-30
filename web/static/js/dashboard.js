@@ -148,6 +148,32 @@ function reportDashboardNotice(message, type = 'info') {
     }
 }
 
+function reportToneLabel(tone) {
+    return {
+        executive: 'Ejecutivo',
+        technical: 'Técnico',
+        commercial: 'Comercial'
+    }[tone] || tone || 'Informe';
+}
+
+function reportLanguageLabel(language) {
+    return {
+        'es-ES': 'Español',
+        en: 'Inglés'
+    }[language] || language || '';
+}
+
+function safeReportText(value) {
+    if (typeof escapeHtml === 'function') return escapeHtml(value || '');
+    return String(value || '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
+
 async function getReportSettingsForGeneration() {
     if (typeof window.loadReportSettings === 'function') {
         return await window.loadReportSettings();
@@ -196,6 +222,7 @@ async function openReportModal(crawlId) {
         setReportFieldValue('reportGenerateFooterText', settings.footer_text || '');
         setReportFieldValue('reportGenerateLogoPath', settings.logo_path || '');
         setReportStatus('');
+        await loadReportDownloadButtons(crawlId);
 
         const downloadLink = document.getElementById('reportDownloadLink');
         if (downloadLink) downloadLink.style.display = 'none';
@@ -238,6 +265,44 @@ function reportGenerationPayloadFromModal() {
         footer_text: document.getElementById('reportGenerateFooterText')?.value || '',
         logo_path: document.getElementById('reportGenerateLogoPath')?.value || ''
     };
+}
+
+async function loadReportDownloadButtons(crawlId) {
+    const container = document.getElementById('reportDownloadButtons');
+    if (!container || !crawlId) return;
+
+    try {
+        const response = await fetch(`/api/crawls/${crawlId}/reports`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'No se pudieron cargar los informes');
+        renderReportDownloadButtons(data.reports || []);
+    } catch (error) {
+        console.warn('Could not load report downloads:', error);
+        container.innerHTML = '';
+    }
+}
+
+function renderReportDownloadButtons(reports) {
+    const container = document.getElementById('reportDownloadButtons');
+    if (!container) return;
+
+    const completed = (reports || []).filter(report => report.status === 'completed' && report.download_url);
+    if (!completed.length) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="report-downloads-title">Descargas generadas</div>
+        <div class="report-downloads-grid">
+            ${completed.map(report => `
+                <a class="report-download-btn" href="${safeReportText(report.download_url)}" target="_blank">
+                    <strong>${safeReportText(reportToneLabel(report.tone))}</strong>
+                    <span>${safeReportText(reportLanguageLabel(report.language))}</span>
+                </a>
+            `).join('')}
+        </div>
+    `;
 }
 
 async function submitReportGeneration() {
@@ -308,6 +373,7 @@ async function pollReportStatus(reportId, useModal) {
             const href = `/api/reports/${reportId}/download`;
             setReportStatus('Informe completado.');
             showReportDownload(href);
+            if (useModal) loadReportDownloadButtons(activeReportCrawlId);
             if (!useModal) window.location.href = href;
             return;
         }

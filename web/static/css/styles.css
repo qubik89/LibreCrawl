@@ -687,6 +687,61 @@ body {
     align-items: center;
 }
 
+.report-downloads {
+    border-top: 1px solid rgba(148, 163, 184, 0.22);
+    display: grid;
+    gap: 10px;
+    margin-top: 18px;
+    padding-top: 16px;
+}
+
+.report-downloads:empty {
+    display: none;
+}
+
+.report-downloads-title {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.report-downloads-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.report-download-btn {
+    align-items: flex-start;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    color: #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 54px;
+    padding: 10px 12px;
+    text-decoration: none;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.report-download-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(16, 185, 129, 0.55);
+    transform: translateY(-1px);
+}
+
+.report-download-btn strong {
+    color: #f8fafc;
+    font-size: 13px;
+}
+
+.report-download-btn span {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
 .setting-help {
     display: block;
     margin-top: 4px;

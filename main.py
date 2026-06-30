@@ -465,6 +465,8 @@ def public_report_job(job):
     """Return report job fields safe for API responses."""
     if not job:
         return None
+    has_pdf = bool(job.get('pdf_path'))
+    download_url = f"/api/reports/{job.get('id')}/download" if has_pdf and job.get('status') == 'completed' else None
     return {
         'id': job.get('id'),
         'crawl_id': job.get('crawl_id'),
@@ -477,7 +479,8 @@ def public_report_job(job):
         'updated_at': job.get('updated_at'),
         'completed_at': job.get('completed_at'),
         'usage': job.get('usage'),
-        'has_pdf': bool(job.get('pdf_path')),
+        'has_pdf': has_pdf,
+        'download_url': download_url,
     }
 
 
@@ -529,13 +532,14 @@ def run_report_job(report_id, crawl_id, options):
             client, model, audit_packet, findings, prompt_bundle, model_metadata
         )
 
-        paths = report_output_paths(crawl_id, report_id)
+        paths = report_output_paths(crawl_id, report_id, language=options['language'], tone=options['tone'])
         paths['dir'].mkdir(parents=True, exist_ok=True)
         paths['markdown'].write_text(markdown_text, encoding='utf-8')
         html = render_report_html(
             markdown_text,
             options.get('branding'),
             audit_packet.get('crawl_metadata') or {},
+            audit_packet=audit_packet,
         )
         paths['html'].write_text(html, encoding='utf-8')
         render_report_pdf(html, paths['pdf'])
@@ -1134,6 +1138,29 @@ def create_crawl_report(crawl_id):
         return jsonify({'success': True, 'report_id': report_id})
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/crawls/<int:crawl_id>/reports')
+@login_required
+def list_crawl_reports(crawl_id):
+    """Return generated report jobs for one crawl."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.crawl_db import get_crawl_by_id
+        from src.reporting_jobs import list_report_jobs_for_crawl
+
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+        if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
+        return jsonify({
+            'success': True,
+            'reports': [public_report_job(job) for job in list_report_jobs_for_crawl(crawl_id)],
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

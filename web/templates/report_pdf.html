@@ -6,134 +6,450 @@
     <style>
         :root {
             --brand-primary: {{ branding.primary_color }};
-            --text: #111827;
-            --muted: #6b7280;
-            --border: #e5e7eb;
-            --background: #ffffff;
+            --ink: #1d1d1f;
+            --ink-soft: #4b4945;
+            --muted: #78736b;
+            --paper: #f7f3ec;
+            --surface: #fffefa;
+            --surface-soft: #eee7dc;
+            --line: #d8d0c3;
+            --risk: #9f1239;
+            --warn: #b45309;
+            --good: #0f766e;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            color: var(--text);
-            background: var(--background);
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 14px;
-            line-height: 1.55;
+            color: var(--ink);
+            background: var(--paper);
+            font-family: "Aptos", "Helvetica Neue", "Avenir Next", sans-serif;
+            font-size: 10.8pt;
+            line-height: 1.58;
+            font-kerning: normal;
+            font-variant-numeric: tabular-nums;
         }
 
-        .page {
-            padding: 36px 42px;
+        .report-shell {
+            background: var(--surface);
+            min-height: 100vh;
         }
 
-        header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 24px;
-            border-bottom: 3px solid var(--brand-primary);
-            padding-bottom: 18px;
-            margin-bottom: 28px;
+        .report-cover {
+            border-bottom: 1.3pt solid var(--ink);
+            display: grid;
+            gap: 18pt;
+            grid-template-columns: minmax(0, 1fr) 48mm;
+            padding-bottom: 20pt;
         }
 
-        .agency {
-            font-size: 20px;
-            font-weight: 700;
-        }
-
-        .crawl {
-            color: var(--muted);
-            font-size: 12px;
-            text-align: right;
+        .brand-line {
+            color: var(--ink-soft);
+            font-size: 9.5pt;
+            margin-bottom: 10pt;
         }
 
         .logo {
-            max-width: 140px;
-            max-height: 52px;
+            max-height: 15mm;
+            max-width: 42mm;
             object-fit: contain;
-            margin-bottom: 8px;
+            margin-bottom: 10pt;
         }
 
-        h1, h2, h3 {
-            color: var(--text);
-            line-height: 1.25;
+        .agency {
+            font-size: 10pt;
+            font-weight: 700;
+            margin-bottom: 24pt;
         }
 
-        h1 {
-            font-size: 28px;
-            margin: 0 0 18px;
+        .report-title {
+            font-size: 30pt;
+            font-weight: 760;
+            line-height: 1.02;
+            max-width: 13ch;
         }
 
-        h2 {
-            border-bottom: 1px solid var(--border);
-            font-size: 20px;
-            margin-top: 28px;
-            padding-bottom: 6px;
+        .crawl-card {
+            align-self: end;
+            border-left: 2.5pt solid var(--brand-primary);
+            color: var(--ink-soft);
+            font-size: 8.8pt;
+            line-height: 1.45;
+            padding-left: 10pt;
+            word-break: break-word;
         }
 
-        a {
-            color: var(--brand-primary);
+        .crawl-card strong {
+            color: var(--ink);
+            display: block;
+            font-size: 10pt;
+            margin-bottom: 4pt;
         }
 
-        table {
+        .cover-metrics {
+            display: grid;
+            gap: 10pt;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 18pt;
+        }
+
+        .cover-metric {
+            border-top: 1pt solid var(--line);
+            padding-top: 8pt;
+        }
+
+        .cover-metric strong {
+            display: block;
+            font-size: 20pt;
+            line-height: 1;
+        }
+
+        .cover-metric span {
+            color: var(--muted);
+            font-size: 8.6pt;
+        }
+
+        .report-body {
+            display: grid;
+            gap: 10mm;
+            grid-template-columns: 34mm minmax(0, 1fr);
+            padding-top: 20pt;
+        }
+
+        .content-rail {
+            max-width: 74ch;
+        }
+
+        .side-index {
+            border-right: 1pt solid var(--line);
+            color: var(--muted);
+            font-size: 8.6pt;
+            padding-right: 7mm;
+        }
+
+        .side-index div {
+            border-bottom: 1pt solid var(--line);
+            padding: 7pt 0;
+        }
+
+        .section-title {
+            color: var(--ink);
+            font-size: 15pt;
+            font-weight: 730;
+            line-height: 1.18;
+            margin: 0 0 10pt;
+        }
+
+        .executive-brief,
+        .evidence-panels,
+        .recommendations,
+        .technical-appendix {
+            break-inside: avoid;
+            margin-bottom: 24pt;
+        }
+
+        .executive-brief {
+            border-bottom: 1pt solid var(--line);
+            padding-bottom: 8pt;
+        }
+
+        .evidence-panels {
+            display: grid;
+            gap: 10pt;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .exhibit {
+            border: 1pt solid var(--line);
+            border-radius: 7pt;
+            break-inside: avoid;
+            padding: 10pt;
+        }
+
+        .exhibit h3 {
+            font-size: 10.5pt;
+            margin: 0 0 9pt;
+        }
+
+        .bar-list {
+            display: grid;
+            gap: 7pt;
+        }
+
+        .bar-row {
+            display: grid;
+            gap: 7pt;
+            grid-template-columns: 72pt minmax(0, 1fr) 24pt;
+            align-items: center;
+            font-size: 8.4pt;
+        }
+
+        .bar-track {
+            background: var(--surface-soft);
+            height: 7pt;
+        }
+
+        .bar-fill {
+            background: var(--brand-primary);
+            height: 100%;
+        }
+
+        .risk-table,
+        .appendix-table {
             border-collapse: collapse;
-            margin: 18px 0;
+            font-size: 8.8pt;
+            line-height: 1.38;
             width: 100%;
         }
 
-        th, td {
-            border: 1px solid var(--border);
-            padding: 8px;
+        .risk-table th,
+        .appendix-table th {
+            background: var(--surface-soft);
+            color: var(--ink);
+            font-weight: 700;
+        }
+
+        .risk-table th,
+        .risk-table td,
+        .appendix-table th,
+        .appendix-table td {
+            border-bottom: 0.8pt solid var(--line);
+            padding: 6pt 5pt;
             text-align: left;
             vertical-align: top;
         }
 
-        th {
-            background: #f9fafb;
+        h1, h2, h3, h4 {
+            color: var(--ink);
+            font-weight: 730;
+            line-height: 1.18;
+        }
+
+        h1 {
+            font-size: 23pt;
+            margin: 0 0 13pt;
+        }
+
+        h2 {
+            border-top: 1pt solid var(--line);
+            break-after: avoid;
+            font-size: 15pt;
+            margin: 22pt 0 8pt;
+            padding-top: 13pt;
+        }
+
+        h3 {
+            break-after: avoid;
+            font-size: 12pt;
+            margin: 16pt 0 6pt;
+        }
+
+        p, ul, ol, table, blockquote, pre {
+            margin: 0 0 11pt;
+        }
+
+        ul, ol {
+            padding-left: 17pt;
+        }
+
+        li + li {
+            margin-top: 3pt;
+        }
+
+        a {
+            color: var(--brand-primary);
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        blockquote {
+            border-left: 2pt solid var(--brand-primary);
+            color: var(--ink-soft);
+            margin-left: 0;
+            padding-left: 10pt;
+        }
+
+        code,
+        pre {
+            background: var(--surface-soft);
+            color: #3f3328;
+            font-family: "SFMono-Regular", Consolas, monospace;
+            font-size: 0.9em;
         }
 
         code {
-            background: #f3f4f6;
-            border-radius: 4px;
-            padding: 2px 4px;
+            border-radius: 3pt;
+            padding: 1pt 3pt;
         }
 
-        footer {
-            border-top: 1px solid var(--border);
+        pre {
+            overflow-wrap: anywhere;
+            padding: 9pt;
+            white-space: pre-wrap;
+        }
+
+        .report-footer {
+            border-top: 1pt solid var(--line);
             color: var(--muted);
-            font-size: 12px;
-            margin-top: 36px;
-            padding-top: 14px;
+            font-size: 8.5pt;
+            margin-top: 24pt;
+            padding-top: 9pt;
+        }
+
+        .url-cell {
+            overflow-wrap: anywhere;
+        }
+
+        @media print {
+            body {
+                background: var(--surface);
+            }
+
+            .report-cover,
+            .exhibit,
+            .risk-table,
+            .appendix-table,
+            blockquote,
+            pre {
+                break-inside: avoid;
+            }
+        }
+
+        @media screen {
+            .report-shell {
+                padding: 22mm 20mm;
+            }
         }
     </style>
 </head>
 <body>
-    <main class="page">
-        <header>
+    <main class="report-shell">
+        <header class="report-cover">
             <div>
                 {% if branding.logo_path %}
                     <img class="logo" src="{{ branding.logo_path }}" alt="{{ branding.agency_name }}">
                 {% endif %}
                 <div class="agency">{{ branding.agency_name }}</div>
+                <div class="brand-line">Informe SEO ejecutivo</div>
+                <div class="report-title">{{ report.domain }}</div>
+                {% if report.stats %}
+                    <div class="cover-metrics">
+                        {% for stat in report.stats %}
+                            <div class="cover-metric">
+                                <strong>{{ stat.value }}</strong>
+                                <span>{{ stat.label }}</span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
             </div>
-            <div class="crawl">
-                {% if crawl.base_domain %}
-                    <div>{{ crawl.base_domain }}</div>
+            <aside class="crawl-card">
+                <strong>{{ report.domain }}</strong>
+                {% if report.base_url %}
+                    <div>{{ report.base_url }}</div>
                 {% endif %}
-                {% if crawl.base_url %}
-                    <div>{{ crawl.base_url }}</div>
+                {% if report.crawl_id %}
+                    <div>Rastreo #{{ report.crawl_id }}</div>
                 {% endif %}
-                {% if crawl.id %}
-                    <div>Rastreo #{{ crawl.id }}</div>
-                {% endif %}
-            </div>
+            </aside>
         </header>
 
-        <article>
-            {{ report_html|safe }}
+        <article class="report-body">
+            <nav class="side-index">
+                <div>01 Resumen ejecutivo</div>
+                <div>02 Evidencia</div>
+                <div>03 Prioridades</div>
+                <div>04 Anexo tecnico</div>
+            </nav>
+            <div class="content-rail">
+                <section class="executive-brief">
+                    {{ report_html|safe }}
+                </section>
+
+                <section class="evidence-panels">
+                    {% if report.status_distribution %}
+                        <div class="exhibit">
+                            <h3>Salud HTTP</h3>
+                            <div class="bar-list">
+                                {% for row in report.status_distribution %}
+                                    <div class="bar-row">
+                                        <span>{{ row.label }}</span>
+                                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                                        <strong>{{ row.count }}</strong>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+                    {% if report.issue_distribution %}
+                        <div class="exhibit">
+                            <h3>Incidencias por tipo</h3>
+                            <div class="bar-list">
+                                {% for row in report.issue_distribution %}
+                                    <div class="bar-row">
+                                        <span>{{ row.label }}</span>
+                                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                                        <strong>{{ row.count }}</strong>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+                </section>
+
+                {% if report.priority_rows %}
+                    <section class="recommendations">
+                        <h2 class="section-title">Prioridades detectadas</h2>
+                        <table class="risk-table">
+                            <thead>
+                                <tr>
+                                    <th>Frente</th>
+                                    <th>Casos</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in report.priority_rows %}
+                                    <tr>
+                                        <td>{{ row.label }}</td>
+                                        <td>{{ row.count }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </section>
+                {% endif %}
+
+                <section class="technical-appendix">
+                    <h2 class="section-title">Anexo tecnico</h2>
+                    {% if report.sample_issues %}
+                        <table class="appendix-table">
+                            <thead>
+                                <tr>
+                                    <th>URL</th>
+                                    <th>Incidencia</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for issue in report.sample_issues[:8] %}
+                                    <tr>
+                                        <td class="url-cell">{{ issue.url }}</td>
+                                        <td>{{ issue.issue or issue.type or issue.category }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p>No hay muestras de incidencias en el paquete de auditoria.</p>
+                    {% endif %}
+                </section>
+            </div>
         </article>
 
         {% if branding.footer_text %}
-            <footer>{{ branding.footer_text }}</footer>
+            <footer class="report-footer">{{ branding.footer_text }}</footer>
         {% endif %}
     </main>
 </body>

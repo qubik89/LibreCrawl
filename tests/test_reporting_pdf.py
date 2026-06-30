@@ -7,6 +7,49 @@ from src import reporting_pdf
 
 
 class ReportingPdfTest(unittest.TestCase):
+    def test_build_report_view_model_uses_audit_packet_metrics_and_distributions(self):
+        packet = {
+            'crawl_metadata': {
+                'id': 42,
+                'base_url': 'https://example.com',
+                'base_domain': 'example.com',
+            },
+            'crawl_summary': {'counts': {'urls': 100, 'links': 250, 'issues': 30}},
+            'analytics_summary': {
+                'status_counts': [
+                    {'status_code': 200, 'count': 80},
+                    {'status_code': 301, 'count': 10},
+                    {'status_code': 404, 'count': 7},
+                    {'status_code': 500, 'count': 3},
+                ],
+                'issue_type_counts': {'error': 12, 'warning': 18},
+            },
+            'top_status_issues': [{'status_code': 404, 'count': 7}],
+            'top_issue_groups': [{'type': 'error', 'issue': 'Missing title', 'count': 12}],
+            'samples': {
+                'issues': {
+                    'rows': [{'url': 'https://example.com/a', 'issue': 'Missing title'}],
+                },
+            },
+        }
+
+        model = reporting_pdf.build_report_view_model(packet)
+
+        self.assertEqual(model['domain'], 'example.com')
+        self.assertEqual(model['stats'][0], {'label': 'URLs rastreadas', 'value': '100'})
+        self.assertEqual(model['status_distribution'][0]['label'], 'Correctas')
+        self.assertEqual(model['status_distribution'][0]['percent'], 80)
+        self.assertEqual(model['issue_distribution'][0]['label'], 'error')
+        self.assertEqual(model['priority_rows'][0]['label'], 'HTTP 404')
+        self.assertEqual(model['sample_issues'][0]['url'], 'https://example.com/a')
+
+    def test_build_report_view_model_omits_missing_groups(self):
+        model = reporting_pdf.build_report_view_model({})
+
+        self.assertEqual(model['stats'], [])
+        self.assertEqual(model['status_distribution'], [])
+        self.assertEqual(model['priority_rows'], [])
+
     def test_report_output_paths_are_rooted_and_reject_traversal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir).resolve()
@@ -24,6 +67,22 @@ class ReportingPdfTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 reporting_pdf.report_output_paths(42, report_id='../../7', base_dir=tmpdir)
 
+    def test_report_output_paths_can_be_grouped_by_language_and_tone(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir).resolve()
+            paths = reporting_pdf.report_output_paths(
+                42,
+                report_id=7,
+                language='es-ES',
+                tone='technical',
+                base_dir=tmpdir,
+            )
+
+            self.assertEqual(paths['dir'], base_dir / '42' / 'es-es' / 'technical')
+            self.assertEqual(paths['markdown'], base_dir / '42' / 'es-es' / 'technical' / 'report-7.md')
+            self.assertEqual(paths['html'], base_dir / '42' / 'es-es' / 'technical' / 'report-7.html')
+            self.assertEqual(paths['pdf'], base_dir / '42' / 'es-es' / 'technical' / 'report-7.pdf')
+
     def test_render_report_html_contains_branding_and_sanitizes_color(self):
         html = reporting_pdf.render_report_html(
             '# Audit\n\nFinding **one**.\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))\n\n![secret](file:///etc/passwd)\n\n![metadata](http://169.254.169.254/latest/meta-data/)',
@@ -34,12 +93,25 @@ class ReportingPdfTest(unittest.TestCase):
                 'logo_path': '/static/logo.png',
             },
             {'id': 42, 'base_url': 'https://example.com', 'base_domain': 'example.com'},
+            audit_packet={
+                'crawl_metadata': {'id': 42, 'base_url': 'https://example.com', 'base_domain': 'example.com'},
+                'crawl_summary': {'counts': {'urls': 10, 'links': 20, 'issues': 3}},
+            },
         )
 
         self.assertIn('ACME &lt;SEO&gt;', html)
         self.assertIn('Prepared for &lt;Client&gt;', html)
         self.assertIn('https://example.com', html)
         self.assertIn('/static/logo.png', html)
+        self.assertIn('class="report-shell"', html)
+        self.assertIn('class="report-cover"', html)
+        self.assertIn('class="report-body"', html)
+        self.assertIn('class="content-rail"', html)
+        self.assertIn('class="cover-metrics"', html)
+        self.assertIn('class="executive-brief"', html)
+        self.assertIn('class="evidence-panels"', html)
+        self.assertIn('class="technical-appendix"', html)
+        self.assertIn('URLs rastreadas', html)
         self.assertIn('<h1>Audit</h1>', html)
         self.assertIn('<strong>one</strong>', html)
         self.assertIn('--brand-primary: #2563eb;', html)
@@ -79,7 +151,12 @@ class ReportingPdfTest(unittest.TestCase):
         self.assertEqual(result, output_path.resolve())
         chromium.launch.assert_called_once_with(headless=True, args=['--no-sandbox'])
         page.set_content.assert_called_once_with('<h1>Report</h1>', wait_until='networkidle')
-        page.pdf.assert_called_once_with(path=str(output_path.resolve()), format='A4', print_background=True)
+        page.pdf.assert_called_once_with(
+            path=str(output_path.resolve()),
+            format='A4',
+            print_background=True,
+            margin={'top': '18mm', 'right': '20mm', 'bottom': '22mm', 'left': '20mm'},
+        )
         browser.close.assert_called_once_with()
 
     def test_render_report_pdf_rejects_paths_outside_reports_base_and_closes_on_error(self):
