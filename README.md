@@ -284,6 +284,7 @@ For PageSpeed analysis, add a Google API key in Settings > Requests for higher r
 ## Export formats
 
 - **CSV**: Spreadsheet-friendly format
+- **XLSX**: Native Excel workbook
 - **JSON**: Structured data with all details
 - **XML**: Markup format for other tools
 

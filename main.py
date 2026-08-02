@@ -12,7 +12,8 @@ import os
 import multiprocessing
 from io import StringIO
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
+from urllib.parse import urlencode
+from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, send_file, stream_with_context
 from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
@@ -1797,6 +1798,59 @@ def crawl_samples_by_id(crawl_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/crawls/<int:crawl_id>/export/<dataset>')
+@login_required
+def download_crawl_export(crawl_id, dataset):
+    """Stream one persisted crawl dataset from ClickHouse or legacy SQLite."""
+    try:
+        from src.crawl_db import get_crawl_by_id
+        from src.crawl_export import (
+            export_body,
+            export_mimetype,
+            normalize_export_fields,
+            normalize_export_format,
+            open_crawl_rows,
+        )
+
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+        if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
+
+        export_format = normalize_export_format(request.args.get('format', 'csv'))
+        fields = normalize_export_fields(dataset, request.args.get('fields', ''))
+        row_source = open_crawl_rows(crawl_id, dataset)
+        rows = row_source.rows
+
+        if dataset == 'issues':
+            current_settings = get_session_settings().get_settings()
+            patterns_text = current_settings.get('issueExclusionPatterns', '')
+            patterns = [pattern.strip() for pattern in patterns_text.split('\n') if pattern.strip()]
+            if patterns:
+                rows = (
+                    issue
+                    for issue in rows
+                    if filter_issues_by_exclusion_patterns([issue], patterns)
+                )
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        filename = f'mitmore_seo_crawl_{dataset}_{crawl_id}_{timestamp}.{export_format}'
+        response = Response(
+            stream_with_context(export_body(rows, fields, dataset, export_format)),
+            content_type=export_mimetype(export_format),
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Cache-Control': 'no-store',
+                'X-Accel-Buffering': 'no',
+            },
+        )
+        return response
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/crawls/<int:crawl_id>/pause', methods=['POST'])
 @login_required
 def pause_crawl_by_id(crawl_id):
@@ -2049,24 +2103,60 @@ def crawl_stats():
 @login_required
 def export_data():
     try:
-        data = request.get_json()
-        export_format = data.get('format', 'csv')
+        from src.crawl_export import normalize_export_fields, normalize_export_format
+
+        data = request.get_json() or {}
+        export_format = normalize_export_format(data.get('format', 'csv'))
         export_fields = data.get('fields', ['url', 'status_code', 'title'])
+        if not isinstance(export_fields, list):
+            return jsonify({'success': False, 'error': 'Los campos de exportación no son válidos'}), 400
         local_data = data.get('localData', {})
         crawl_id = data.get('crawlId') or session.get('current_crawl_id')
 
-        # Use local data if provided (from loaded crawl), otherwise get from crawler
+        # Persisted crawls are exported by dedicated streaming downloads. This
+        # avoids loading million-row crawls into Flask and encoding them in JSON.
         if crawl_id:
-            from src.crawl_db import get_crawl_by_id, load_crawled_urls, load_crawl_links, load_crawl_issues
+            from src.crawl_db import get_crawl_by_id
+
             crawl = get_crawl_by_id(crawl_id)
             if not crawl:
                 return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
             if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
                 return jsonify({'success': False, 'error': 'No autorizado'}), 403
-            urls = load_crawled_urls(crawl_id)
-            links = load_crawl_links(crawl_id)
-            issues = load_crawl_issues(crawl_id)
-        elif local_data and local_data.get('urls'):
+
+            regular_fields = [
+                field for field in export_fields
+                if field not in ('issues_detected', 'links_detailed')
+            ]
+            downloads = []
+            if regular_fields:
+                regular_fields = normalize_export_fields('urls', regular_fields)
+                query = urlencode({
+                    'format': export_format,
+                    'fields': ','.join(regular_fields),
+                })
+                downloads.append({
+                    'url': f'/api/crawls/{int(crawl_id)}/export/urls?{query}',
+                    'dataset': 'urls',
+                })
+            if 'links_detailed' in export_fields:
+                query = urlencode({'format': export_format})
+                downloads.append({
+                    'url': f'/api/crawls/{int(crawl_id)}/export/links?{query}',
+                    'dataset': 'links',
+                })
+            if 'issues_detected' in export_fields:
+                query = urlencode({'format': export_format})
+                downloads.append({
+                    'url': f'/api/crawls/{int(crawl_id)}/export/issues?{query}',
+                    'dataset': 'issues',
+                })
+            if not downloads:
+                return jsonify({'success': False, 'error': 'No hay campos para exportar'}), 400
+            return jsonify({'success': True, 'downloads': downloads})
+
+        # Keep the legacy in-memory path for local, non-persisted crawl data.
+        if local_data and local_data.get('urls'):
             urls = local_data.get('urls', [])
             links = local_data.get('links', [])
             issues = local_data.get('issues', [])
@@ -2080,6 +2170,12 @@ def export_data():
 
         if not urls:
             return jsonify({'success': False, 'error': 'No hay datos para exportar'})
+
+        if export_format == 'xlsx':
+            return jsonify({
+                'success': False,
+                'error': 'La exportación XLSX requiere un rastreo guardado',
+            }), 400
 
         # Update link statuses from crawled URLs (fixes missing status codes in exports)
         if links and urls:
@@ -2198,6 +2294,8 @@ def export_data():
                 'filename': file_data['filename']
             })
 
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

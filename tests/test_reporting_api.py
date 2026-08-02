@@ -27,6 +27,15 @@ def import_main():
     fake_flask.url_for = mock.Mock(return_value='/login')
     fake_flask.send_file = mock.Mock()
 
+    class FakeResponse:
+        def __init__(self, response=None, content_type=None, headers=None, **_kwargs):
+            self.response = response
+            self.content_type = content_type
+            self.headers = headers or {}
+
+    fake_flask.Response = FakeResponse
+    fake_flask.stream_with_context = lambda iterable: iterable
+
     fake_flask_compress = types.ModuleType('flask_compress')
     fake_flask_compress.Compress = mock.Mock()
 
@@ -129,6 +138,60 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertFalse(response['success'])
         load_urls.assert_not_called()
+
+    def test_export_data_for_stored_crawl_returns_streaming_download(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.path = '/api/export_data'
+        payload = {
+            'crawlId': 42,
+            'format': 'csv',
+            'fields': ['url', 'status_code', 'title'],
+        }
+
+        with mock.patch.object(main.request, 'get_json', return_value=payload):
+            with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+                'id': 42,
+                'user_id': 5,
+                'session_id': 'session-a',
+            }):
+                with mock.patch('src.crawl_db.load_crawled_urls') as load_urls:
+                    response = main.export_data()
+
+        self.assertTrue(response['success'])
+        self.assertEqual(response['downloads'], [{
+            'url': '/api/crawls/42/export/urls?format=csv&fields=url%2Cstatus_code%2Ctitle',
+            'dataset': 'urls',
+        }])
+        load_urls.assert_not_called()
+
+    def test_download_crawl_export_streams_selected_clickhouse_fields(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.path = '/api/crawls/42/export/urls'
+        args = {
+            'format': 'csv',
+            'fields': 'url,status_code',
+        }
+        main.request.args = types.SimpleNamespace(
+            get=lambda key, default=None, type=None: args.get(key, default),
+        )
+        source = types.SimpleNamespace(
+            rows=iter([{'url': 'https://example.com', 'status_code': 200}]),
+            source='clickhouse',
+        )
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+            'id': 42,
+            'user_id': 5,
+            'session_id': 'session-a',
+        }):
+            with mock.patch('src.crawl_export.open_crawl_rows', return_value=source):
+                response = main.download_crawl_export(42, 'urls')
+
+        content = b''.join(response.response).decode('utf-8-sig')
+        self.assertEqual(content, 'url,status_code\r\nhttps://example.com,200\r\n')
+        self.assertEqual(response.content_type, 'text/csv; charset=utf-8')
+        self.assertIn('attachment;', response.headers['Content-Disposition'])
+        self.assertEqual(response.headers['X-Accel-Buffering'], 'no')
 
     def test_report_settings_update_preserves_blank_or_missing_key(self):
         self.assertEqual(

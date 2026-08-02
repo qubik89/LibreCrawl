@@ -100,6 +100,7 @@ async function loadDashboardCrawls() {
                         <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">Ver</button>
                         ${running ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="pauseCrawlFromDashboard(${crawl.id})">Pausar</button>` : ''}
                         ${paused || ['paused', 'failed', 'stopped', 'running'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Reanudar</button>` : ''}
+                        ${completed ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="exportData(${crawl.id})">Exportar</button>` : ''}
                         ${completed && reportActionsEnabled ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="openReportModal(${crawl.id})">Informe</button>` : ''}
                         ${crawl.is_active ? `<button class="btn btn-danger" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="stopCrawlFromDashboard(${crawl.id})">Detener</button>` : ''}
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCrawlFromDashboard(${crawl.id})">Eliminar</button>

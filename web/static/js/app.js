@@ -1763,8 +1763,10 @@ async function loadUserInfo() {
     }
 }
 
-async function exportData() {
+async function exportData(crawlIdOverride = null) {
     try {
+        const exportCrawlId = crawlIdOverride || crawlState.currentCrawlId;
+
         // Get current settings to determine export format and fields
         const settingsResponse = await fetch('/api/get_settings');
         const settingsData = await settingsResponse.json();
@@ -1784,7 +1786,7 @@ async function exportData() {
         let exportLinks = [];
         let exportIssues = [];
 
-        if (crawlState.currentCrawlId) {
+        if (exportCrawlId) {
             hasData = true;
         } else {
             // Always fetch from backend to ensure we have the latest data including links
@@ -1817,8 +1819,8 @@ async function exportData() {
             format: exportFormat,
             fields: exportFields
         };
-        if (crawlState.currentCrawlId) {
-            exportPayload.crawlId = crawlState.currentCrawlId;
+        if (exportCrawlId) {
+            exportPayload.crawlId = exportCrawlId;
         } else {
             exportPayload.localData = {
                 urls: exportUrls,
@@ -1840,6 +1842,24 @@ async function exportData() {
 
         if (!exportData.success) {
             showNotification(exportData.error || 'La exportación ha fallado', 'error');
+            return;
+        }
+
+        if (Array.isArray(exportData.downloads) && exportData.downloads.length > 0) {
+            exportData.downloads.forEach((download, index) => {
+                setTimeout(() => {
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = download.url;
+                    a.target = '_blank';
+                    a.rel = 'noopener';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }, index * 500);
+            });
+            const fileLabel = exportData.downloads.length === 1 ? 'archivo' : 'archivos';
+            showNotification(`Descargando ${exportData.downloads.length} ${fileLabel}...`, 'success');
             return;
         }
 
