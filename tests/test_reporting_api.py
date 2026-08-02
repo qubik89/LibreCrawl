@@ -122,6 +122,77 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(main._page_offset(-10), 0)
         self.assertEqual(main._page_offset('bad'), 0)
 
+    def test_visualization_reads_clickhouse_rows_and_builds_edges(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})
+        main.request.path = '/api/visualization_data'
+        crawl = {'id': 42, 'user_id': 5, 'session_id': 'session-a'}
+        urls = [
+            {'url': 'https://example.test/', 'status_code': 200, 'title': 'Home', 'depth': 0},
+            {'url': 'https://example.test/about', 'status_code': 200, 'title': 'About', 'depth': 1},
+        ]
+        links = [{
+            'source_url': 'https://example.test/',
+            'target_url': 'https://example.test/about',
+            'is_internal': True,
+        }]
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=crawl):
+            with mock.patch('src.crawl_clickhouse.load_urls', return_value={'rows': urls, 'total': 2}):
+                with mock.patch('src.crawl_clickhouse.load_links', return_value={'rows': links, 'total': 1}):
+                    with mock.patch('src.crawl_db.load_crawled_urls') as sqlite_urls:
+                        with mock.patch('src.crawl_db.load_crawl_links') as sqlite_links:
+                            response = main.visualization_data()
+
+        self.assertTrue(response['success'])
+        self.assertEqual(response['total_pages'], 2)
+        self.assertEqual(response['visualized_pages'], 2)
+        self.assertEqual(len(response['nodes']), 2)
+        self.assertEqual(len(response['edges']), 1)
+        sqlite_urls.assert_not_called()
+        sqlite_links.assert_not_called()
+
+    def test_visualization_falls_back_to_sqlite_per_collection(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})
+        main.request.path = '/api/visualization_data'
+        crawl = {'id': 42, 'user_id': 5, 'session_id': 'session-a'}
+        urls = [
+            {'url': 'https://example.test/', 'status_code': 200, 'title': 'Home', 'depth': 0},
+            {'url': 'https://example.test/about', 'status_code': 200, 'title': 'About', 'depth': 1},
+        ]
+        links = [{
+            'source_url': 'https://example.test/',
+            'target_url': 'https://example.test/about',
+            'is_internal': True,
+        }]
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=crawl):
+            with mock.patch('src.crawl_clickhouse.load_urls', return_value=None):
+                with mock.patch('src.crawl_clickhouse.load_links', return_value=None):
+                    with mock.patch('src.crawl_db.get_crawl_counts', return_value={'urls': 2}):
+                        with mock.patch('src.crawl_db.load_crawled_urls', return_value=urls):
+                            with mock.patch('src.crawl_db.load_crawl_links', return_value=links):
+                                response = main.visualization_data()
+
+        self.assertTrue(response['success'])
+        self.assertEqual(response['total_pages'], 2)
+        self.assertEqual(len(response['edges']), 1)
+
+    def test_visualization_rejects_crawl_owned_by_another_user(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})
+        main.request.path = '/api/visualization_data'
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+            'id': 42,
+            'user_id': 99,
+            'session_id': 'session-b',
+        }):
+            with mock.patch('src.crawl_clickhouse.load_urls') as load_urls:
+                response, status = main.visualization_data()
+
+        self.assertEqual(status, 403)
+        self.assertFalse(response['success'])
+        load_urls.assert_not_called()
+
     def test_export_data_rejects_unauthorized_crawl_id(self):
         main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
         main.request.path = '/api/export_data'

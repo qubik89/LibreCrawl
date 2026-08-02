@@ -1311,6 +1311,52 @@ def crawl_status():
     payload['issues'] = load_crawl_issues_page(crawl_id, limit=500, offset=issue_since or 0).get_json().get('issues', [])
     return jsonify(payload)
 
+
+def _load_visualization_rows(crawl_id, url_limit=500, link_limit=2000):
+    """Load the bounded graph input from the active result backend.
+
+    Crawl results may live only in ClickHouse in production, while local
+    installs can still use SQLite. Each collection falls back independently so
+    a temporary failure in one ClickHouse table does not hide the other data.
+    """
+    from src.crawl_db import get_crawl_counts, load_crawled_urls, load_crawl_links
+
+    crawled_pages = None
+    all_links = None
+    total_pages = None
+
+    try:
+        from src.crawl_clickhouse import load_links, load_urls
+
+        url_page = load_urls(crawl_id, limit=url_limit)
+        if url_page is not None:
+            crawled_pages = url_page.get('rows') or []
+            total_pages = int(url_page.get('total') or len(crawled_pages))
+    except Exception as e:
+        print(f"ClickHouse visualization URLs unavailable for crawl {crawl_id}: {e}")
+
+    try:
+        from src.crawl_clickhouse import load_links
+
+        link_page = load_links(crawl_id, limit=link_limit)
+        if link_page is not None:
+            all_links = link_page.get('rows') or []
+    except Exception as e:
+        print(f"ClickHouse visualization links unavailable for crawl {crawl_id}: {e}")
+
+    if crawled_pages is None:
+        crawled_pages = load_crawled_urls(crawl_id, limit=url_limit)
+        try:
+            total_pages = int((get_crawl_counts(crawl_id) or {}).get('urls') or len(crawled_pages))
+        except Exception:
+            total_pages = len(crawled_pages)
+
+    if all_links is None:
+        all_links = load_crawl_links(crawl_id, limit=link_limit)
+
+    return crawled_pages, all_links, total_pages
+
+
 @app.route('/api/visualization_data')
 @login_required
 def visualization_data():
@@ -1318,14 +1364,21 @@ def visualization_data():
     try:
         crawl_id = session.get('current_crawl_id')
         if crawl_id:
-            from src.crawl_db import load_crawled_urls, load_crawl_links
-            crawled_pages = load_crawled_urls(crawl_id, limit=500)
-            all_links = load_crawl_links(crawl_id, limit=2000)
+            from src.crawl_db import get_crawl_by_id
+
+            crawl = get_crawl_by_id(crawl_id)
+            if not crawl:
+                return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+            if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+                return jsonify({'success': False, 'error': 'No autorizado'}), 403
+
+            crawled_pages, all_links, total_pages = _load_visualization_rows(crawl_id)
         else:
             crawler = get_or_create_crawler()
             status_data = crawler.get_status()
             crawled_pages = status_data.get('urls', [])
             all_links = status_data.get('links', [])
+            total_pages = len(crawled_pages)
 
         # Build nodes and edges for the graph
         nodes = []
@@ -1396,9 +1449,9 @@ def visualization_data():
             'success': True,
             'nodes': nodes,
             'edges': edges,
-            'total_pages': len(crawled_pages),
+            'total_pages': total_pages,
             'visualized_pages': len(nodes),
-            'truncated': len(crawled_pages) > max_nodes
+            'truncated': total_pages > max_nodes
         })
 
     except Exception as e:

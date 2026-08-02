@@ -8,11 +8,33 @@ let graphData = { nodes: [], edges: [] };  // Current graph data
 let currentLayout = 'cose';  // Current layout algorithm
 let currentFilter = 'all';  // Current filter
 
+function setVisualizationState(title, message) {
+    const container = document.getElementById('cy');
+    if (!container) return;
+
+    const placeholder = container.querySelector('.graph-placeholder');
+    if (!placeholder) return;
+
+    const heading = placeholder.querySelector('h3');
+    const description = placeholder.querySelector('p');
+    if (heading) heading.textContent = title;
+    if (description) description.textContent = message;
+    placeholder.style.display = 'block';
+}
+
+function hideVisualizationState() {
+    const container = document.getElementById('cy');
+    const placeholder = container && container.querySelector('.graph-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+}
+
 /**
  * Initialize the visualization when tab is opened
  */
 function initVisualization() {
     if (cy) {
+        cy.resize();
+        if (graphData.nodes.length === 0) loadVisualizationData();
         return; // Already initialized
     }
 
@@ -22,11 +44,13 @@ function initVisualization() {
         return;
     }
 
-    // Hide placeholder
-    const placeholder = container.querySelector('.graph-placeholder');
-    if (placeholder) {
-        placeholder.style.display = 'none';
+    if (typeof cytoscape !== 'function') {
+        setVisualizationState('No se pudo cargar el mapa', 'La librería de visualización no está disponible.');
+        console.error('Cytoscape.js is not available');
+        return;
     }
+
+    setVisualizationState('Cargando mapa...', 'Obteniendo las relaciones del rastreo.');
 
     // Initialize Cytoscape
     cy = cytoscape({
@@ -89,6 +113,7 @@ function initVisualization() {
         minZoom: 0.1,
         maxZoom: 3
     });
+    cy.resize();
 
     // Add interaction handlers
     setupInteractions();
@@ -190,10 +215,17 @@ function setupInteractions() {
 async function loadVisualizationData() {
     try {
         const response = await fetch('/api/visualization_data');
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch (parseError) {
+            throw new Error(`Respuesta no válida del servidor (${response.status})`);
+        }
 
-        if (!data.success) {
-            console.error('Failed to load visualization data:', data.error);
+        if (!response.ok || !data.success) {
+            const message = data.error || `El servidor respondió con ${response.status}`;
+            setVisualizationState('No se pudo cargar el mapa', message);
+            console.error('Failed to load visualization data:', message);
             return;
         }
 
@@ -201,6 +233,12 @@ async function loadVisualizationData() {
             nodes: data.nodes || [],
             edges: data.edges || []
         };
+
+        if (graphData.nodes.length === 0) {
+            if (cy) cy.elements().remove();
+            setVisualizationState('Sin datos para visualizar', 'Inicia o carga un rastreo para ver sus relaciones.');
+            return;
+        }
 
         // Show warning if data was truncated
         if (data.truncated) {
@@ -211,6 +249,7 @@ async function loadVisualizationData() {
         updateGraph();
 
     } catch (error) {
+        setVisualizationState('No se pudo cargar el mapa', error.message || 'Error inesperado al obtener los datos.');
         console.error('Error loading visualization data:', error);
     }
 }
@@ -258,7 +297,14 @@ function updateGraph() {
         );
     }
 
+    if (filteredNodes.length === 0) {
+        cy.elements().remove();
+        setVisualizationState('Sin resultados', 'No hay páginas que coincidan con este filtro.');
+        return;
+    }
+
     // Update graph
+    hideVisualizationState();
     cy.elements().remove();
     cy.add([...filteredNodes, ...filteredEdges]);
 
@@ -407,13 +453,7 @@ function clearVisualization() {
     }
 
     // Show placeholder
-    const container = document.getElementById('cy');
-    if (container) {
-        const placeholder = container.querySelector('.graph-placeholder');
-        if (placeholder) {
-            placeholder.style.display = 'block';
-        }
-    }
+    setVisualizationState('Sin datos para visualizar', 'Inicia o carga un rastreo para ver sus relaciones.');
 
     console.log('Visualization cleared');
 }
@@ -423,6 +463,9 @@ function clearVisualization() {
  */
 function updateVisualizationFromLoadedData(urls, links) {
     if (!urls || urls.length === 0) {
+        graphData = { nodes: [], edges: [] };
+        if (cy) cy.elements().remove();
+        setVisualizationState('Sin datos para visualizar', 'Inicia o carga un rastreo para ver sus relaciones.');
         console.log('No URL data to visualize');
         return;
     }
@@ -499,13 +542,7 @@ function updateVisualizationFromLoadedData(urls, links) {
     graphData = { nodes, edges };
 
     // Hide placeholder
-    const container = document.getElementById('cy');
-    if (container) {
-        const placeholder = container.querySelector('.graph-placeholder');
-        if (placeholder) {
-            placeholder.style.display = 'none';
-        }
-    }
+    hideVisualizationState();
 
     // If visualization is already initialized, update it
     if (cy) {
