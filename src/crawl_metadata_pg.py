@@ -54,6 +54,15 @@ def init_tables():
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawls_user_status ON crawls(user_id, status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawls_session ON crawls(session_id)')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crawl_enrichments (
+                crawl_id BIGINT NOT NULL REFERENCES crawls(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (crawl_id, source)
+            )
+        ''')
         print("PostgreSQL crawl metadata tables initialized successfully")
 
 
@@ -95,6 +104,41 @@ def update_stats(crawl_id, discovered=None, crawled=None, max_depth=None, peak_m
         params.append(crawl_id)
         cursor.execute(f"UPDATE crawls SET {', '.join(updates)} WHERE id = %s", params)
         return True
+
+
+def update_target(crawl_id, base_url, base_domain):
+    """Record a root-domain redirect target while preserving it in URL rows too."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE crawls SET base_url = %s, base_domain = %s, last_saved_at = CURRENT_TIMESTAMP WHERE id = %s',
+            (base_url, base_domain, crawl_id),
+        )
+        return cursor.rowcount > 0
+
+
+def save_enrichment(crawl_id, source, payload):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO crawl_enrichments (crawl_id, source, payload, updated_at)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (crawl_id, source) DO UPDATE SET payload = EXCLUDED.payload, updated_at = CURRENT_TIMESTAMP
+        ''', (crawl_id, source, json.dumps(payload)))
+        return True
+
+
+def load_enrichments(crawl_id):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT source, payload FROM crawl_enrichments WHERE crawl_id = %s', (crawl_id,))
+        result = {}
+        for row in cursor.fetchall():
+            try:
+                result[row['source']] = json.loads(row['payload'])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                result[row['source']] = {'status': 'invalid'}
+        return result
 
 
 def save_checkpoint(crawl_id, checkpoint_data):

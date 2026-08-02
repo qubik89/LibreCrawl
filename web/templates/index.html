@@ -196,32 +196,12 @@
 
                     <div class="tab-content">
                         <div id="overview-tab" class="tab-pane active">
-                            <div class="table-container">
-                                <table class="data-table" id="overviewTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Dirección</th>
-                                            <th>Estado</th>
-                                            <th>Título</th>
-                                            <th>Meta Desc</th>
-                                            <th>H1</th>
-                                            <th>Palabras</th>
-                                            <th>Respuesta (ms)</th>
-                                            <th>Analytics</th>
-                                            <th>OG Tags</th>
-                                            <th>JSON-LD</th>
-                                            <th>Enlaces (Int/Ext)</th>
-                                            <th>Imágenes</th>
-                                            <th>JS</th>
-                                            <th>Detalles</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="overviewTableBody">
-                                        <!-- Data will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                            <button class="btn btn-secondary btn-small" onclick="loadActiveTabPage(false)">Cargar más</button>
+                            <section id="crawlOverviewDashboard" class="crawl-overview-dashboard" aria-live="polite">
+                                <div class="overview-empty-state">
+                                    <h2>Resumen de auditoria</h2>
+                                    <p>Inicia o carga un rastreo para ver la salud tecnica del sitio.</p>
+                                </div>
+                            </section>
                         </div>
 
                         <div id="internal-tab" class="tab-pane">
@@ -944,69 +924,83 @@
 
                 <!-- Reports Settings -->
                 <div id="reports-settings" class="settings-tab-content">
-                    <h3>Ajustes del informe PDF</h3>
-
-                    <div class="setting-group">
-                        <label for="reportOpenRouterApiKey">Clave API de OpenRouter</label>
-                        <input type="password" id="reportOpenRouterApiKey" placeholder="Déjalo en blanco para mantener la clave guardada">
-                        <span class="setting-help" id="reportOpenRouterKeyStatus">No hay clave guardada</span>
+                    <div class="report-settings-heading">
+                        <div><span class="setting-eyebrow">Report Suite V2</span><h3>Ajustes de informes</h3></div>
+                        <span class="report-capability" id="reportV2Capability">Preparando generación V2</span>
                     </div>
 
-                    <div class="setting-group">
-                        <label for="reportModelSelect">Modelo por defecto</label>
-                        <div class="report-actions-row">
-                            <select id="reportModelSelect">
-                                <option value="">No hay modelos en caché</option>
-                            </select>
-                            <button type="button" class="btn btn-secondary" id="reportRefreshModelsBtn" onclick="refreshReportModels()">Actualizar</button>
-                        </div>
-                        <span class="setting-help">Modelos de OpenAI, Anthropic y DeepSeek cacheados desde OpenRouter.</span>
+                    <div class="report-settings-grid">
+                        <section class="report-settings-band">
+                            <span class="setting-eyebrow">01 · IA e idioma</span>
+                            <h4>Motor de generación</h4>
+                            <div class="setting-group">
+                                <label for="reportOpenRouterApiKey">Clave API de OpenRouter</label>
+                                <input type="password" id="reportOpenRouterApiKey" placeholder="Déjala en blanco para mantener la clave guardada">
+                                <span class="setting-help" id="reportOpenRouterKeyStatus">No hay clave guardada</span>
+                            </div>
+                            <div class="setting-group">
+                                <label for="reportModelSelect">Modelo por defecto</label>
+                                <div class="report-actions-row">
+                                    <select id="reportModelSelect"><option value="">No hay modelos en caché</option></select>
+                                    <button type="button" class="btn btn-secondary" id="reportRefreshModelsBtn" onclick="refreshReportModels()">Actualizar modelos</button>
+                                </div>
+                            </div>
+                            <div class="setting-group">
+                                <label for="reportDefaultLanguage">Idioma predeterminado</label>
+                                <select id="reportDefaultLanguage"><option value="es-ES">Español (España)</option><option value="en">Inglés</option></select>
+                            </div>
+                        </section>
+
+                        <section class="report-settings-band">
+                            <span class="setting-eyebrow">02 · Producto editorial</span>
+                            <h4>Salida por defecto</h4>
+                            <div class="setting-group">
+                                <label for="reportDefaultMode">Producto predeterminado</label>
+                                <select id="reportDefaultMode">
+                                    <option value="pack">Pack completo · Ejecutivo + Comercial + Técnico</option>
+                                    <option value="executive">Solo Ejecutivo</option>
+                                    <option value="commercial">Solo Comercial</option>
+                                    <option value="technical">Solo Técnico</option>
+                                </select>
+                            </div>
+                            <div class="setting-group">
+                                <label for="reportDefaultCommercialContext">Contexto comercial</label>
+                                <select id="reportDefaultCommercialContext"><option value="prospect">Prospecto</option><option value="existing_client">Cliente existente</option></select>
+                            </div>
+                            <div class="report-contract-note"><strong>Contrato fijo</strong><span>A4 · HTML + PDF · control de calidad mínimo 90/100 · una reparación máxima.</span></div>
+                        </section>
+
+                        <section class="report-settings-band">
+                            <span class="setting-eyebrow">03 · Identidad del emisor</span>
+                            <h4>Firma opcional</h4>
+                            <div class="setting-group"><label for="reportIssuerName">Nombre del emisor</label><input type="text" id="reportIssuerName" placeholder="Opcional"></div>
+                            <div class="setting-group"><label for="reportDefaultAuthor">Autor predeterminado</label><input type="text" id="reportDefaultAuthor" placeholder="Equipo responsable"></div>
+                            <div class="setting-group"><label for="reportDefaultContact">Contacto</label><input type="text" id="reportDefaultContact" placeholder="correo o teléfono"></div>
+                            <div class="setting-group"><label for="reportDefaultConfidentiality">Confidencialidad</label><input type="text" id="reportDefaultConfidentiality" placeholder="Uso interno"></div>
+                            <div class="setting-group"><label for="reportDefaultCta">CTA predeterminado</label><input type="text" id="reportDefaultCta" placeholder="Siguiente paso"></div>
+                        </section>
+
+                        <section class="report-settings-band">
+                            <span class="setting-eyebrow">04 · Apariencia</span>
+                            <h4>Paleta y logo</h4>
+                            <div class="report-color-row">
+                                <div class="setting-group"><label for="reportPrimaryColor">Principal</label><input type="color" id="reportPrimaryColor" value="#1d4ed8"></div>
+                                <div class="setting-group"><label for="reportSecondaryColor">Secundario</label><input type="color" id="reportSecondaryColor" value="#334155"></div>
+                                <div class="setting-group"><label for="reportAccentColor">Acento</label><input type="color" id="reportAccentColor" value="#b45309"></div>
+                            </div>
+                            <div class="setting-group">
+                                <label for="reportIssuerLogo">Logo del emisor</label>
+                                <input type="file" id="reportIssuerLogo" accept="image/png,image/jpeg,image/webp" onchange="uploadReportLogo(this)">
+                                <span class="setting-help" id="reportLogoStatus">PNG, JPEG o WebP · máximo 2 MB</span>
+                            </div>
+                            <div class="report-logo-preview" id="reportLogoPreview" hidden><img alt="Vista previa del logo del emisor"><button type="button" class="btn btn-secondary" onclick="removeReportLogo()">Quitar logo</button></div>
+                        </section>
                     </div>
 
-                    <div class="setting-group">
-                        <label for="reportManualModel">Modelo manual</label>
-                        <input type="text" id="reportManualModel" placeholder="openai/gpt-4.1">
-                        <span class="setting-help">Sobrescribe el modelo por defecto seleccionado cuando se indica.</span>
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportDefaultLanguage">Idioma</label>
-                        <select id="reportDefaultLanguage">
-                            <option value="es-ES">Español (España)</option>
-                            <option value="en">Inglés</option>
-                        </select>
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportDefaultTone">Tono</label>
-                        <select id="reportDefaultTone">
-                            <option value="executive">Ejecutivo</option>
-                            <option value="technical">Técnico</option>
-                            <option value="commercial">Comercial</option>
-                        </select>
-                    </div>
-
-                    <h3 style="margin-top: 30px;">Marca</h3>
-
-                    <div class="setting-group">
-                        <label for="reportAgencyName">Nombre de la agencia</label>
-                        <input type="text" id="reportAgencyName" placeholder="Mitmore SEO Crawl">
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportPrimaryColor">Color principal</label>
-                        <input type="color" id="reportPrimaryColor" value="#2563eb">
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportFooterText">Texto del pie</label>
-                        <textarea id="reportFooterText" rows="3" placeholder="Preparado por tu agencia"></textarea>
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportLogoPath">Ruta del logo</label>
-                        <input type="text" id="reportLogoPath" placeholder="/static/logo.png">
-                    </div>
+                    <details class="report-advanced-settings">
+                        <summary>Opciones avanzadas</summary>
+                        <div class="setting-group"><label for="reportManualModel">Modelo manual</label><input type="text" id="reportManualModel" placeholder="anthropic/claude-opus-4.7"><span class="setting-help">Solo se usa cuando necesitas seleccionar un identificador no guardado en el caché.</span></div>
+                    </details>
                 </div>
 
                 <!-- Advanced Settings -->
@@ -1076,71 +1070,79 @@
     <div id="reportModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Generar informe PDF</h2>
+                <h2>Generar informe</h2>
                 <button class="modal-close" onclick="closeReportModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div style="padding: 24px;">
-                    <div class="setting-group">
-                        <label for="reportGenerateModelSelect">Model</label>
-                        <select id="reportGenerateModelSelect">
-                            <option value="">Usar valor guardado</option>
-                        </select>
-                    </div>
+                <div class="report-wizard" id="reportWizard">
+                    <nav class="report-wizard-steps" aria-label="Pasos de generación">
+                        <button type="button" class="wizard-step is-active" data-wizard-step="1" onclick="setReportWizardStep(1)"><span>01</span> Producto</button>
+                        <button type="button" class="wizard-step" data-wizard-step="2" onclick="setReportWizardStep(2)"><span>02</span> Cliente y marca</button>
+                        <button type="button" class="wizard-step" data-wizard-step="3" onclick="setReportWizardStep(3)"><span>03</span> Evidencia</button>
+                        <button type="button" class="wizard-step" data-wizard-step="4" onclick="setReportWizardStep(4)"><span>04</span> Revisión</button>
+                    </nav>
 
-                    <div class="setting-group">
-                        <label for="reportGenerateManualModel">Modelo manual</label>
-                        <input type="text" id="reportGenerateManualModel" placeholder="openai/gpt-4.1">
-                        <span class="setting-help">Sobrescribe el modelo seleccionado para este informe.</span>
-                    </div>
+                    <section class="report-wizard-panel is-active" data-wizard-panel="1">
+                        <span class="setting-eyebrow">Producto y audiencia</span>
+                        <h3>Elige la salida editorial</h3>
+                        <div class="report-option-grid">
+                            <label class="report-option"><input type="radio" name="reportGenerateReportMode" value="pack" checked><strong>Pack completo</strong><span>Ejecutivo, comercial y técnico sobre el mismo análisis.</span></label>
+                            <label class="report-option"><input type="radio" name="reportGenerateReportMode" value="executive"><strong>Ejecutivo</strong><span>Decisiones, prioridades y hoja de ruta.</span></label>
+                            <label class="report-option"><input type="radio" name="reportGenerateReportMode" value="commercial"><strong>Comercial</strong><span>Oportunidad, alcance y siguiente paso.</span></label>
+                            <label class="report-option"><input type="radio" name="reportGenerateReportMode" value="technical"><strong>Técnico</strong><span>Evidencias, backlog y validación.</span></label>
+                        </div>
+                        <div class="report-wizard-fields">
+                            <div class="setting-group"><label for="reportGenerateLanguage">Idioma</label><select id="reportGenerateLanguage"><option value="es-ES">Español (España)</option><option value="en">Inglés</option></select></div>
+                            <div class="setting-group"><label for="reportGenerateCommercialContext">Contexto comercial</label><select id="reportGenerateCommercialContext"><option value="prospect">Prospecto</option><option value="existing_client">Cliente existente</option></select></div>
+                        </div>
+                    </section>
 
-                    <div class="setting-group">
-                        <label for="reportGenerateLanguage">Idioma</label>
-                        <select id="reportGenerateLanguage">
-                            <option value="es-ES">Español (España)</option>
-                            <option value="en">Inglés</option>
-                        </select>
-                    </div>
+                    <section class="report-wizard-panel" data-wizard-panel="2">
+                        <span class="setting-eyebrow">Cliente y marca</span>
+                        <h3>Presentación del informe</h3>
+                        <div class="report-wizard-fields">
+                            <div class="setting-group"><label for="reportGenerateClientName">Nombre del cliente</label><input type="text" id="reportGenerateClientName" placeholder="Se completará con el dominio final"></div>
+                            <div class="setting-group"><label for="reportGenerateTitle">Título del informe</label><input type="text" id="reportGenerateTitle" placeholder="Opcional"></div>
+                            <div class="setting-group"><label for="reportGenerateMarket">Mercado</label><input type="text" id="reportGenerateMarket" placeholder="España, Europa…"></div>
+                            <div class="setting-group"><label for="reportGenerateAuthor">Autor</label><input type="text" id="reportGenerateAuthor" placeholder="Equipo responsable"></div>
+                            <div class="setting-group"><label for="reportGenerateContact">Contacto</label><input type="text" id="reportGenerateContact" placeholder="Opcional"></div>
+                            <div class="setting-group"><label for="reportGenerateConfidentiality">Confidencialidad</label><input type="text" id="reportGenerateConfidentiality" placeholder="Uso interno"></div>
+                        </div>
+                        <div class="setting-group"><label for="reportGenerateGoals">Objetivos de negocio</label><textarea id="reportGenerateGoals" rows="3" placeholder="Opcional"></textarea></div>
+                        <div class="setting-group"><label for="reportGenerateCta">Siguiente paso / CTA</label><input type="text" id="reportGenerateCta" placeholder="Opcional"></div>
+                        <div class="setting-group"><label for="reportGenerateLogoChoice">Logo</label><select id="reportGenerateLogoChoice"><option value="issuer">Logo del emisor</option><option value="none">Sin logo</option><option value="client">Subir logo del cliente</option></select></div>
+                        <div class="setting-group" id="reportClientLogoGroup" hidden><label for="reportClientLogo">Logo del cliente</label><input type="file" id="reportClientLogo" accept="image/png,image/jpeg,image/webp" onchange="uploadReportClientLogo(this)"><span class="setting-help" id="reportClientLogoStatus"></span></div>
+                        <div class="report-color-row">
+                            <div class="setting-group"><label for="reportGeneratePrimaryColor">Principal</label><input type="color" id="reportGeneratePrimaryColor" value="#1d4ed8"></div>
+                            <div class="setting-group"><label for="reportGenerateSecondaryColor">Secundario</label><input type="color" id="reportGenerateSecondaryColor" value="#334155"></div>
+                            <div class="setting-group"><label for="reportGenerateAccentColor">Acento</label><input type="color" id="reportGenerateAccentColor" value="#b45309"></div>
+                        </div>
+                    </section>
 
-                    <div class="setting-group">
-                        <label for="reportGenerateTone">Tono</label>
-                        <select id="reportGenerateTone">
-                            <option value="executive">Ejecutivo</option>
-                            <option value="technical">Técnico</option>
-                            <option value="commercial">Comercial</option>
-                        </select>
-                    </div>
+                    <section class="report-wizard-panel" data-wizard-panel="3">
+                        <span class="setting-eyebrow">Evidencia</span>
+                        <h3>Comprueba la cobertura antes de generar</h3>
+                        <div class="report-preflight" id="reportPreflightPanel" aria-live="polite"><span class="report-loading">Calculando cobertura…</span></div>
+                        <div class="setting-group"><label for="reportGenerateBaseline">Comparar con</label><select id="reportGenerateBaseline"><option value="">Sin comparación histórica</option></select><span class="setting-help">Solo se muestran crawls completados del mismo dominio final.</span></div>
+                    </section>
 
-                    <h3 style="margin-top: 24px;">Marca</h3>
+                    <section class="report-wizard-panel" data-wizard-panel="4">
+                        <span class="setting-eyebrow">Revisión</span>
+                        <h3>Confirmación de generación</h3>
+                        <div class="report-generation-summary" id="reportGenerationSummary"></div>
+                        <div class="report-contract-note"><strong>Control aplicado</strong><span>El contenido se valida contra los hechos, se revisa con un segundo pase y se repara como máximo una vez.</span></div>
+                    </section>
 
-                    <div class="setting-group">
-                        <label for="reportGenerateAgencyName">Nombre de la agencia</label>
-                        <input type="text" id="reportGenerateAgencyName" placeholder="Mitmore SEO Crawl">
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportGeneratePrimaryColor">Color principal</label>
-                        <input type="color" id="reportGeneratePrimaryColor" value="#2563eb">
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportGenerateFooterText">Texto del pie</label>
-                        <textarea id="reportGenerateFooterText" rows="3"></textarea>
-                    </div>
-
-                    <div class="setting-group">
-                        <label for="reportGenerateLogoPath">Ruta del logo</label>
-                        <input type="text" id="reportGenerateLogoPath" placeholder="/static/logo.png">
-                    </div>
-
-                    <div class="report-status" id="reportGenerationStatus" style="display: none;"></div>
+                    <div class="report-status" id="reportGenerationStatus" role="status" aria-live="polite" style="display: none;"></div>
                     <div class="report-downloads" id="reportDownloadButtons"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <a class="btn btn-success" id="reportDownloadLink" href="#" target="_blank" style="display: none;">Descargar PDF</a>
                 <button class="btn btn-secondary" onclick="closeReportModal()">Cancelar</button>
-                <button class="btn btn-primary" id="reportGenerateBtn" onclick="submitReportGeneration()">Generar PDF</button>
+                <button class="btn btn-secondary" id="reportWizardPrev" onclick="setReportWizardStep(reportWizardStep - 1)" hidden>Atrás</button>
+                <button class="btn btn-primary" id="reportWizardNext" onclick="advanceReportWizard()">Continuar</button>
+                <button class="btn btn-primary" id="reportGenerateBtn" onclick="submitReportGeneration()">Generar informe</button>
             </div>
         </div>
     </div>
@@ -1151,6 +1153,7 @@
     <script src="/static/js/visualization.js"></script>
     <script src="/static/js/plugin-loader.js"></script>
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/overview-dashboard.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>

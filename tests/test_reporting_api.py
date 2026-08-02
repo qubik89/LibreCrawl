@@ -1,4 +1,5 @@
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -105,6 +106,9 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(public['masked_openrouter_api_key'], 'sk-l...7890')
         self.assertEqual(public['default_model'], 'openai/gpt-4.1')
 
+        fallback = main.public_report_settings({'primary_color': 'url(javascript:bad)'})
+        self.assertEqual(fallback['appearance']['primary_color'], '#1d4ed8')
+
     def test_login_required_rejects_stale_user_session_for_api(self):
         main.session.update({'user_id': 999, 'username': 'stale', 'tier': 'admin'})
         main.request.path = '/api/start_crawl'
@@ -121,6 +125,84 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(main._page_limit('bad'), 500)
         self.assertEqual(main._page_offset(-10), 0)
         self.assertEqual(main._page_offset('bad'), 0)
+
+    def test_dashboard_fallback_filters_can_be_combined(self):
+        row = {
+            'url': 'https://example.test/a', 'is_internal': True,
+            'status_code': 404, 'content_type': 'text/html', 'depth': 2,
+        }
+        self.assertTrue(main._row_matches_filters(row, {
+            'scope': 'internal', 'status_family': '4xx',
+            'content_type': 'html', 'depth': '2',
+        }, 'urls'))
+        self.assertFalse(main._row_matches_filters(row, {'scope': 'external'}, 'urls'))
+
+    def test_dashboard_endpoint_checks_owner_and_caches_snapshot(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.path = '/api/crawls/91/dashboard'
+        main.dashboard_cache.clear()
+        crawl = {
+            'id': 91, 'user_id': 5, 'session_id': 'session-a',
+            'status': 'completed', 'base_url': 'https://example.test',
+            'urls_discovered': 2, 'urls_crawled': 2,
+        }
+        snapshot = {'crawl': {'id': 91, 'status': 'completed', 'discovered': 2, 'crawled': 2}, 'coverage': {}, 'enrichments': {}}
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=crawl):
+            with mock.patch('src.dashboard_data.build_dashboard_snapshot', return_value=snapshot) as build:
+                with mock.patch.object(main, 'get_session_settings', return_value=mock.Mock(
+                    get_settings=lambda: {'issueExclusionPatterns': ''},
+                )):
+                    first = main.crawl_dashboard_by_id(91)
+                    second = main.crawl_dashboard_by_id(91)
+
+        self.assertTrue(first['success'])
+        self.assertEqual(first['crawl']['progress'], 100.0)
+        self.assertEqual(second['crawl']['id'], 91)
+        build.assert_called_once_with(91, ())
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value={**crawl, 'user_id': 7}):
+            response, status = main.crawl_dashboard_by_id(91)
+        self.assertEqual(status, 403)
+        self.assertFalse(response['success'])
+
+    def test_clickhouse_cursor_is_serialized_as_exact_text(self):
+        cursor = 1785696868549154891
+
+        self.assertEqual(main._next_cursor([{'_row_order': cursor}], 0), str(cursor))
+        self.assertEqual(main._next_cursor([], cursor), str(cursor))
+
+    def test_issue_page_exposes_clickhouse_cursor_as_text(self):
+        cursor = 1785696868549154891
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.path = '/api/crawls/9/issues'
+        main.request.args = types.SimpleNamespace(
+            get=lambda _key, default=None, type=None: default,
+            getlist=lambda _key: [],
+        )
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value={
+            'id': 9,
+            'user_id': 5,
+            'session_id': 'session-a',
+        }):
+            with mock.patch('src.crawl_clickhouse.load_issues', return_value={
+                'rows': [{
+                    '_row_order': str(cursor),
+                    'url': 'https://example.com/a',
+                    'type': 'warning',
+                    'category': 'SEO',
+                    'issue': 'Example issue',
+                    'details': 'Example details',
+                }],
+                'total': 1,
+            }):
+                with mock.patch.object(main, 'get_session_settings', return_value=mock.Mock(
+                    get_settings=lambda: {'issueExclusionPatterns': ''},
+                )):
+                    response = main.load_crawl_issues_page(9, limit=1, offset=0)
+
+        self.assertEqual(response['issues'][0]['_row_order'], str(cursor))
+        self.assertEqual(response['next_cursor'], str(cursor))
 
     def test_visualization_reads_clickhouse_rows_and_builds_edges(self):
         main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})
@@ -282,6 +364,163 @@ class ReportingApiHelperTest(unittest.TestCase):
             {'openrouter_api_key': 'sk-test'},
         )
 
+    def test_report_profile_payload_uses_v2_fields_and_rejects_invalid_palette(self):
+        profile = main.report_profile_update_from_payload({
+            'default_report_mode': 'pack',
+            'default_commercial_context': 'existing_client',
+            'issuer': {'name': 'Agency', 'author': 'SEO Team'},
+            'appearance': {'primary_color': '#123456', 'secondary_color': '#334455', 'accent_color': '#aa5500'},
+        })
+        self.assertEqual(profile['default_report_mode'], 'pack')
+        self.assertEqual(profile['default_commercial_context'], 'existing_client')
+        self.assertEqual(profile['issuer_name'], 'Agency')
+        self.assertEqual(profile['primary_color'], '#123456')
+        self.assertNotIn('agency_name', profile)
+        self.assertEqual(
+            main.report_profile_update_from_payload({'tone': 'technical'})['default_report_mode'],
+            'technical',
+        )
+        with self.assertRaises(ValueError):
+            main.report_profile_update_from_payload({'appearance': {'primary_color': 'red'}})
+
+    def test_report_profile_does_not_persist_displayed_key_mask(self):
+        self.assertNotIn('openrouter_api_key', main.report_profile_update_from_payload({
+            'openrouter_api_key': 'sk-l...7890',
+        }))
+
+    def test_legacy_requests_remain_single_product_when_profile_defaults_to_pack(self):
+        options = main.resolve_report_request_options(
+            {'tone': 'technical', 'use_v2': False},
+            {'default_report_mode': 'pack', 'default_tone': 'executive', 'default_model': 'openai/gpt-4.1'},
+        )
+        self.assertEqual(options['report_types'], ['technical'])
+        self.assertFalse(options['use_v2'])
+
+        default_options = main.resolve_report_request_options(
+            {'use_v2': False},
+            {'default_report_mode': 'pack', 'default_model': 'openai/gpt-4.1'},
+        )
+        self.assertEqual(default_options['report_types'], ['executive'])
+
+    def test_enrichment_request_keeps_reference_but_drops_inline_credentials(self):
+        options = main.resolve_report_request_options(
+            {'enrichments': {'gsc': {'status': 'available', 'connection_id': 'gsc-1', 'data': {'access_token': 'secret'}}}},
+            {'default_model': 'openai/gpt-4.1'},
+        )
+        self.assertEqual(options['enrichments'], {'gsc': {'status': 'available', 'connection_id': 'gsc-1'}})
+
+    def test_public_profile_has_no_product_brand_by_default(self):
+        public = main.public_report_settings({
+            'default_model': 'anthropic/claude-opus-4.7', 'default_report_mode': 'pack',
+            'issuer_name': None,
+        })
+        self.assertEqual(public['default_report_mode'], 'pack')
+        self.assertEqual(public['issuer']['name'], '')
+        self.assertNotIn('Mitmore', public['issuer']['name'])
+        self.assertNotIn('LibreCrawl', public['issuer']['name'])
+
+    def test_public_profile_filters_product_brand_from_legacy_identity_fields(self):
+        public = main.public_report_settings({
+            'default_confidentiality': 'Mitmore internal',
+            'default_author': 'LibreCrawl team',
+        })
+        self.assertEqual(public['issuer']['confidentiality'], '')
+        self.assertEqual(public['issuer']['author'], '')
+
+    def test_public_profile_does_not_echo_unknown_connection_fields(self):
+        public = main.public_report_settings({
+            'default_model': 'anthropic/claude-opus-4.7',
+            'connection_id': 'gsc-private-1',
+            'access_token': 'secret',
+        })
+        self.assertNotIn('connection_id', public)
+        self.assertNotIn('access_token', public)
+
+    def test_sole_admin_migration_gate_requires_exactly_one_admin(self):
+        fake_users = types.SimpleNamespace(
+            get_all_users=mock.Mock(return_value=[{'id': 5, 'tier': 'admin'}]),
+        )
+        with mock.patch.dict(sys.modules, {'src.auth_db': fake_users}):
+            self.assertTrue(main._is_sole_admin(5))
+            fake_users.get_all_users.return_value = [
+                {'id': 5, 'tier': 'admin'}, {'id': 6, 'tier': 'admin'},
+            ]
+            self.assertFalse(main._is_sole_admin(5))
+
+    def test_report_preflight_is_token_free_and_rejects_cross_domain_baseline(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.args = types.SimpleNamespace(get=lambda key, default=None, type=None: {
+            'report_types': 'executive,commercial,technical', 'baseline_crawl_id': '8',
+        }.get(key, default))
+        current = {'id': 7, 'user_id': 5, 'status': 'completed', 'base_domain': 'example.test'}
+        baseline = {'id': 8, 'user_id': 5, 'status': 'completed', 'base_domain': 'other.test'}
+        with mock.patch('src.crawl_db.get_crawl_by_id', side_effect=[current, baseline]):
+            response, status = main.report_preflight(7)
+        self.assertEqual(status, 400)
+        self.assertIn('mismo dominio', response['error'])
+
+        main.request.args = types.SimpleNamespace(get=lambda key, default=None, type=None: {
+            'report_types': 'executive',
+        }.get(key, default))
+        facts = {
+            'coverage': {'denominators': {'unique_urls': 2, 'html_2xx_urls': 2}, 'coverage_ratio': 100},
+            'limitations': [], 'enrichments': {}, 'comparison': {'available': False},
+        }
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=current):
+            with mock.patch('src.crawl_db.get_user_crawls', return_value=[]):
+                with mock.patch('src.reporting_v2.build_audit_facts', return_value=facts) as build:
+                    with mock.patch('src.reporting_settings.get_openrouter_model', return_value=None):
+                        result = main.report_preflight(7)
+        self.assertTrue(result['success'])
+        build.assert_called_once_with(7, crawl_metadata=current, baseline_crawl_id=None)
+        self.assertFalse(result['estimate']['pricing_available'])
+
+    def test_report_preflight_only_recommends_an_older_same_domain_crawl(self):
+        main.session.update({'user_id': 5, 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.args = types.SimpleNamespace(get=lambda key, default=None, type=None: {
+            'report_types': 'executive',
+        }.get(key, default))
+        current = {
+            'id': 12, 'user_id': 5, 'status': 'completed', 'base_domain': 'example.test',
+            'started_at': '2026-08-02 12:00:00', 'completed_at': '2026-08-02 12:02:00',
+        }
+        newer = {
+            'id': 13, 'user_id': 5, 'status': 'completed', 'base_domain': 'example.test',
+            'started_at': '2026-08-02 13:00:00', 'completed_at': '2026-08-02 13:02:00',
+        }
+        facts = {
+            'coverage': {'denominators': {'unique_urls': 1, 'html_2xx_urls': 1}, 'coverage_ratio': 100},
+            'limitations': [], 'enrichments': {}, 'comparison': {'available': False},
+        }
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=current):
+            with mock.patch('src.crawl_db.get_user_crawls', return_value=[newer]):
+                with mock.patch('src.reporting_v2.build_audit_facts', return_value=facts):
+                    with mock.patch('src.reporting_settings.get_openrouter_model', return_value=None):
+                        result = main.report_preflight(12)
+        self.assertTrue(result['success'])
+        self.assertIsNone(result['baseline']['selected_id'])
+        self.assertEqual(result['baseline']['candidates'], [])
+
+    def test_report_preflight_can_explicitly_disable_automatic_baseline(self):
+        main.session.update({'user_id': 5, 'tier': 'admin', 'session_id': 'session-a'})
+        main.request.args = types.SimpleNamespace(get=lambda key, default=None, type=None: {
+            'report_types': 'executive', 'baseline_crawl_id': 'none',
+        }.get(key, default))
+        current = {'id': 12, 'user_id': 5, 'status': 'completed', 'base_domain': 'example.test'}
+        older = {'id': 11, 'user_id': 5, 'status': 'completed', 'base_domain': 'example.test'}
+        facts = {
+            'coverage': {'denominators': {'unique_urls': 1, 'html_2xx_urls': 1}, 'coverage_ratio': 100},
+            'limitations': [], 'enrichments': {}, 'comparison': {'available': False},
+        }
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=current):
+            with mock.patch('src.crawl_db.get_user_crawls', return_value=[older]):
+                with mock.patch('src.reporting_v2.build_audit_facts', return_value=facts) as build:
+                    with mock.patch('src.reporting_settings.get_openrouter_model', return_value=None):
+                        result = main.report_preflight(12)
+        self.assertTrue(result['success'])
+        self.assertIsNone(result['baseline']['selected_id'])
+        build.assert_called_once_with(12, crawl_metadata=current, baseline_crawl_id=None)
+
     def test_resolve_report_request_options_uses_overrides_then_settings(self):
         options = main.resolve_report_request_options(
             {
@@ -322,6 +561,41 @@ class ReportingApiHelperTest(unittest.TestCase):
             main.resolve_report_request_options({'tone': 'casual'}, {'default_model': 'openai/gpt-4.1'})
         with self.assertRaises(ValueError):
             main.resolve_report_request_options({'model': 'google/gemini'}, {})
+
+    def test_report_v2_pack_options_are_normalized_without_credentials(self):
+        with mock.patch.object(main, 'REPORTS_V2_ENABLED', True):
+            options = main.resolve_report_request_options({
+                'report_types': ['executive', 'commercial', 'technical', 'executive'],
+                'commercial_context': 'existing_client',
+                'baseline_crawl_id': '7',
+                'use_v2': True,
+                'brand_kit': {'client_name': 'Example', 'primary_color': '#0f766e'},
+                'client_context': {'author': 'SEO Team', 'business_goals': 'Improve qualified acquisition'},
+                'enrichments': {'gsc': {'connection_id': 'gsc-1'}},
+            }, {'default_model': 'anthropic/claude-opus-4.7', 'openrouter_api_key': 'sk-test'})
+
+        self.assertEqual(options['report_types'], ['executive', 'commercial', 'technical'])
+        self.assertEqual(options['commercial_context'], 'existing_client')
+        self.assertEqual(options['baseline_crawl_id'], 7)
+        self.assertTrue(options['use_v2'])
+        self.assertEqual(options['client_context']['client_name'], 'Example')
+        self.assertNotIn('openrouter_api_key', options['enrichments']['gsc'])
+
+    def test_pack_profile_defaults_expand_to_three_v2_products(self):
+        with mock.patch.object(main, 'REPORTS_V2_ENABLED', True):
+            options = main.resolve_report_request_options({
+                'report_mode': 'pack', 'use_v2': True,
+            }, {
+                'default_model': 'anthropic/claude-opus-4.7',
+                'openrouter_api_key': 'sk-test', 'default_report_mode': 'pack',
+            })
+        self.assertEqual(options['report_types'], ['executive', 'commercial', 'technical'])
+        self.assertTrue(options['use_v2'])
+
+    def test_report_v2_is_rejected_when_the_feature_flag_is_off(self):
+        with mock.patch.object(main, 'REPORTS_V2_ENABLED', False):
+            with self.assertRaises(ValueError):
+                main.resolve_report_request_options({'use_v2': True}, {})
 
     def test_reports_require_admin_session(self):
         main.session.update({'user_id': 5, 'tier': 'user'})
@@ -388,6 +662,14 @@ class ReportingApiHelperTest(unittest.TestCase):
             'total_tokens': 20,
         })
 
+    def test_report_usage_cost_is_unknown_without_provider_pricing(self):
+        usage = {'total': {'prompt_tokens': 1000, 'completion_tokens': 500}}
+        self.assertEqual(
+            main.report_usage_cost({'pricing': {'prompt': '0.001', 'completion': '0.002'}}, usage),
+            2.0,
+        )
+        self.assertIsNone(main.report_usage_cost({}, usage))
+
     def test_report_access_context_reuses_crawl_ownership(self):
         with mock.patch('src.reporting_jobs.get_report_job', return_value={'id': 7, 'crawl_id': 42}):
             with mock.patch('src.crawl_db.get_crawl_by_id', return_value={'id': 42, 'user_id': 5, 'session_id': 'guest'}):
@@ -425,6 +707,14 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertIsNone(public['error'])
         self.assertTrue(public['has_pdf'])
         self.assertEqual(public['download_url'], '/api/reports/3/download')
+
+    def test_public_failed_report_error_redacts_secrets_and_paths(self):
+        public = main.public_report_job({
+            'id': 4, 'crawl_id': 42, 'status': 'failed', 'tone': 'technical',
+            'error': 'OpenRouter sk-live-secret failed at /srv/librecrawl/report.json',
+        })
+        self.assertNotIn('sk-live-secret', public['error'])
+        self.assertNotIn('/srv/librecrawl', public['error'])
 
     def test_list_crawl_reports_returns_authorized_public_jobs(self):
         main.session.update({'user_id': 5, 'tier': 'admin', 'session_id': 'session-a'})
@@ -508,6 +798,179 @@ class ReportingApiHelperTest(unittest.TestCase):
                 'prompt_tokens': 10,
                 'completion_tokens': 8,
             })
+
+    def test_run_report_job_v2_writes_traceable_artifacts_with_shared_analysis(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            paths = {
+                'dir': output_dir,
+                'markdown': output_dir / 'report-3.md',
+                'html': output_dir / 'report-3.html',
+                'pdf': output_dir / 'report-3.pdf',
+                'facts': output_dir / 'report-3.facts.json',
+                'analysis': output_dir / 'report-3.analysis.json',
+                'document': output_dir / 'report-3.document.json',
+                'quality': output_dir / 'report-3.quality.json',
+                'manifest': output_dir / 'report-3.manifest.json',
+            }
+            facts = {
+                'schema_version': '2.0', 'crawl': {'id': 42, 'base_domain': 'example.test'},
+                'coverage': {'denominators': {}}, 'distributions': {}, 'thematic_metrics': {},
+                'evidence': {}, 'limitations': [],
+            }
+            analysis = {'findings': [], 'recommendations': [], 'limitations': []}
+            document_json = '{"title":"Audit","subtitle":"","sections":[],"closing":""}'
+
+            with mock.patch('src.reporting_jobs.update_report_job') as update_job:
+                with mock.patch('src.openrouter_client.OpenRouterClient'):
+                    with mock.patch('src.openrouter_client.generate_report_document', return_value=(document_json, {'completion_tokens': 8})):
+                        with mock.patch(
+                            'src.openrouter_client.generate_report_quality_review',
+                            return_value=('{"verdict":"pass","score":100,"issues":[]}', {'completion_tokens': 2}),
+                        ):
+                            with mock.patch('src.reporting_pdf.report_output_paths', return_value=paths):
+                                with mock.patch('src.reporting_pdf.render_report_document_html', return_value='<h1>Audit</h1>'):
+                                    with mock.patch('src.reporting_pdf.render_report_pdf'):
+                                        with mock.patch('src.reporting_settings.get_openrouter_model', return_value={'supported_parameters': []}):
+                                            main.run_report_job(3, 42, {
+                                                'use_v2': True, 'model': 'anthropic/claude-opus-4.7', 'language': 'es-ES',
+                                                'tone': 'executive', 'report_type': 'executive', 'commercial_context': 'prospect',
+                                                'branding': {'primary_color': '#0f766e'}, 'client_context': {'client_name': 'Example'},
+                                                'openrouter_api_key': 'sk-test', 'baseline_crawl_id': None, 'enrichments': {},
+                                            }, shared_facts=facts, shared_analysis=analysis, shared_analysis_usage={'prompt_tokens': 4})
+
+            self.assertTrue(paths['facts'].exists())
+            self.assertTrue(paths['analysis'].exists())
+            self.assertTrue(paths['document'].exists())
+            self.assertTrue(paths['quality'].exists())
+            self.assertTrue(paths['manifest'].exists())
+            completed = update_job.call_args_list[-1].kwargs
+            self.assertEqual(completed['status'], 'completed')
+            self.assertEqual(completed['template_version'], '2.0')
+            self.assertEqual(completed['usage']['total'], {'prompt_tokens': 4, 'completion_tokens': 10})
+
+    def test_quality_cycle_runs_exactly_one_repair_and_rechecks(self):
+        facts = {'evidence': {'issues': [{'id': 'issues-1'}]}}
+        analysis = {
+            'findings': [{
+                'id': 'finding-1', 'theme': 'indexability', 'severity': 'high', 'confidence': 'high',
+                'observation': 'Una URL indexable devuelve un error.', 'inference': '', 'hypothesis': '',
+                'scope': 'HTML 2xx', 'numerator': 1, 'denominator': 1,
+                'metric_id': 'issues.indexability', 'evidence_ids': ['issues-1'],
+                'limitation': '', 'recommendation_ids': ['recommendation-1'],
+            }],
+            'recommendations': [{
+                'id': 'recommendation-1', 'title': 'Corregir la URL', 'priority': 'now',
+                'impact': 'high', 'effort': 'low', 'owner': 'Equipo SEO', 'dependencies': [],
+                'sequence': 'Primero', 'acceptance_criteria': 'La URL responde correctamente.',
+                'validation': 'Repetir el crawl.', 'kpi': '0 URLs afectadas.',
+            }],
+            'limitations': [],
+        }
+        document = {
+            'report_type': 'executive', 'commercial_context': 'prospect', 'language': 'es-ES',
+            'title': 'Informe ejecutivo', 'subtitle': '',
+            'sections': [{
+                'id': 'summary', 'title': 'Resumen', 'summary': 'Prioridad validada.',
+                'finding_ids': ['finding-1'], 'chart': None, 'actions': ['Corregir la URL'],
+            }],
+            'closing': 'Siguiente paso', 'client_context': {},
+        }
+        repaired_payload = json.dumps({'analysis': analysis, 'document': document})
+        review_responses = [
+            (json.dumps({
+                'verdict': 'fail', 'score': 80,
+                'issues': [{
+                    'code': 'clarity', 'severity': 'major', 'target': 'document',
+                    'target_id': 'summary', 'message': 'Falta claridad.',
+                    'repair_instruction': 'Aclarar la prioridad.',
+                }],
+            }), {'completion_tokens': 2}),
+            ('{"verdict":"pass","score":95,"issues":[]}', {'completion_tokens': 2}),
+        ]
+
+        with mock.patch(
+            'src.openrouter_client.generate_report_quality_review', side_effect=review_responses,
+        ) as review:
+            with mock.patch(
+                'src.openrouter_client.generate_report_repair',
+                return_value=(repaired_payload, {'completion_tokens': 3}),
+            ) as repair:
+                final_analysis, final_document, quality, usage = main.run_report_quality_cycle(
+                    mock.Mock(), 'anthropic/claude-opus-4.7', {'supported_parameters': []},
+                    facts, analysis, document,
+                    {
+                        'report_type': 'executive', 'language': 'es-ES',
+                        'commercial_context': 'prospect', 'quality_review_system_prompt': 'review',
+                        'repair_system_prompt': 'repair', 'tone_prompt': 'executive',
+                    },
+                )
+
+        self.assertEqual(review.call_count, 2)
+        repair.assert_called_once()
+        self.assertEqual(final_analysis['findings'][0]['id'], 'finding-1')
+        self.assertEqual(final_document['sections'][0]['id'], 'summary')
+        self.assertTrue(quality['repair']['attempted'])
+        self.assertTrue(quality['final']['combined']['passed'])
+        self.assertEqual(quality['final']['combined']['score'], 95)
+        self.assertEqual(usage, [
+            {'completion_tokens': 2}, {'completion_tokens': 3}, {'completion_tokens': 2},
+        ])
+
+    def test_v2_failed_quality_gate_keeps_diagnostic_artifacts_without_rendering(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            paths = {
+                'dir': output_dir, 'markdown': output_dir / 'report.md',
+                'html': output_dir / 'report.html', 'pdf': output_dir / 'report.pdf',
+                'facts': output_dir / 'facts.json', 'analysis': output_dir / 'analysis.json',
+                'document': output_dir / 'document.json', 'quality': output_dir / 'quality.json',
+                'manifest': output_dir / 'manifest.json',
+            }
+            facts = {
+                'schema_version': '2.0', 'crawl': {'id': 42},
+                'coverage': {'denominators': {}}, 'distributions': {},
+                'thematic_metrics': {}, 'metric_catalog': [], 'evidence': {}, 'limitations': [],
+            }
+            analysis = {'findings': [], 'recommendations': [], 'limitations': []}
+            failed_review = json.dumps({
+                'verdict': 'fail', 'score': 70,
+                'issues': [{
+                    'code': 'audience-fit', 'severity': 'major', 'target': 'document',
+                    'target_id': None, 'message': 'No alcanza el nivel requerido.',
+                    'repair_instruction': 'Revisar la composición.',
+                }],
+            })
+
+            with mock.patch('src.reporting_jobs.update_report_job') as update_job:
+                with mock.patch('src.openrouter_client.OpenRouterClient'):
+                    with mock.patch('src.openrouter_client.generate_report_document', return_value=('{}', {})):
+                        with mock.patch(
+                            'src.openrouter_client.generate_report_quality_review',
+                            side_effect=[(failed_review, {}), (failed_review, {})],
+                        ):
+                            with mock.patch('src.openrouter_client.generate_report_repair', return_value=('{}', {})) as repair:
+                                with mock.patch('src.reporting_pdf.report_output_paths', return_value=paths):
+                                    with mock.patch('src.reporting_pdf.render_report_document_html') as render_html:
+                                        with mock.patch('src.reporting_pdf.render_report_pdf') as render_pdf:
+                                            with mock.patch('src.reporting_settings.get_openrouter_model', return_value={'supported_parameters': []}):
+                                                main.run_report_job(3, 42, {
+                                                    'use_v2': True, 'model': 'anthropic/claude-opus-4.7',
+                                                    'language': 'es-ES', 'tone': 'executive',
+                                                    'report_type': 'executive', 'commercial_context': 'prospect',
+                                                    'branding': {}, 'client_context': {}, 'openrouter_api_key': 'sk-test',
+                                                    'baseline_crawl_id': None, 'enrichments': {},
+                                                }, shared_facts=facts, shared_analysis=analysis)
+
+            repair.assert_called_once()
+            render_html.assert_not_called()
+            render_pdf.assert_not_called()
+            self.assertTrue(paths['quality'].exists())
+            self.assertTrue(paths['manifest'].exists())
+            failed = update_job.call_args_list[-1].kwargs
+            self.assertEqual(failed['status'], 'failed')
+            self.assertEqual(failed['quality_path'], str(paths['quality']))
+            self.assertIn('no superó el control de calidad', failed['error'])
 
 
 if __name__ == '__main__':

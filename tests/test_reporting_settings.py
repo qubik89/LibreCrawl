@@ -1,8 +1,12 @@
 import os
 import tempfile
 import unittest
+from io import BytesIO
+
+from PIL import Image
 
 from src import reporting_settings
+from src import report_assets
 
 
 class ReportingSettingsTest(unittest.TestCase):
@@ -13,6 +17,11 @@ class ReportingSettingsTest(unittest.TestCase):
         self.addCleanup(tmpdir.cleanup)
         reporting_settings.set_db_file(os.path.join(tmpdir.name, 'reporting.db'))
         reporting_settings.init_reporting_tables()
+        self.addCleanup(self._cleanup_asset_root)
+
+    def _cleanup_asset_root(self):
+        import shutil
+        shutil.rmtree(report_assets.ASSET_ROOT, ignore_errors=True)
 
     def test_filter_openrouter_models_keeps_only_supported_providers(self):
         models = [
@@ -137,6 +146,83 @@ class ReportingSettingsTest(unittest.TestCase):
         self.assertIsNone(model['pricing'])
         self.assertEqual(model['supported_parameters'], [])
         self.assertEqual(reporting_settings.list_openrouter_models()[0]['supported_parameters'], [])
+
+    def test_user_profiles_are_isolated_and_default_to_v2_pack(self):
+        first = reporting_settings.get_user_reporting_settings(10)
+        second = reporting_settings.get_user_reporting_settings(11)
+        self.assertEqual(first['default_report_mode'], 'pack')
+        self.assertEqual(first['default_model'], 'anthropic/claude-opus-4.7')
+        self.assertIsNone(first['openrouter_api_key'])
+
+        reporting_settings.save_user_reporting_settings(10, {
+            'openrouter_api_key': 'sk-user-10', 'issuer_name': 'Agency 10',
+            'default_report_mode': 'technical', 'primary_color': '#123456',
+        })
+        self.assertEqual(reporting_settings.get_user_reporting_settings(10)['issuer_name'], 'Agency 10')
+        self.assertEqual(reporting_settings.get_user_reporting_settings(10)['default_report_mode'], 'technical')
+        self.assertIsNone(reporting_settings.get_user_reporting_settings(11)['openrouter_api_key'])
+        self.assertEqual(second['default_report_mode'], 'pack')
+
+    def test_legacy_settings_migrate_only_when_requested(self):
+        reporting_settings.save_reporting_settings({
+            'openrouter_api_key': 'sk-legacy', 'default_model': 'openai/gpt-4.1',
+            'default_tone': 'commercial', 'agency_name': 'Legacy Agency',
+            'footer_text': 'Internal',
+        })
+        profile = reporting_settings.get_user_reporting_settings(10, migrate_legacy=True)
+        self.assertEqual(profile['openrouter_api_key'], 'sk-legacy')
+        self.assertEqual(profile['default_report_mode'], 'commercial')
+        self.assertEqual(profile['issuer_name'], 'Legacy Agency')
+        self.assertEqual(profile['default_confidentiality'], 'Internal')
+        self.assertIsNone(reporting_settings.get_user_reporting_settings(11)['openrouter_api_key'])
+
+    def test_legacy_product_brand_is_not_migrated_into_white_label_profile(self):
+        reporting_settings.save_reporting_settings({'agency_name': 'Mitmore SEO Crawl'})
+        profile = reporting_settings.get_user_reporting_settings(10, migrate_legacy=True)
+        self.assertIsNone(profile['issuer_name'])
+
+    def test_logo_is_reencoded_and_owned_by_user(self):
+        image = Image.new('RGBA', (32, 20), (12, 34, 56, 255))
+        source = BytesIO()
+        image.save(source, format='PNG')
+        source.seek(0)
+
+        class Upload:
+            filename = 'logo.png'
+
+            def read(self, size=-1):
+                return source.read(size)
+
+        path, mime, name = report_assets.sanitise_logo(Upload(), 10)
+        asset_id = reporting_settings.create_report_asset(10, path, mime, name)
+        asset = reporting_settings.get_report_asset(asset_id, 10)
+        self.assertEqual(asset['mime_type'], 'image/png')
+        self.assertIsNone(reporting_settings.get_report_asset(asset_id, 11))
+        self.assertTrue(report_assets.asset_data_uri(asset).startswith('data:image/png;base64,'))
+        deleted = reporting_settings.delete_report_asset(asset_id, 10)
+        report_assets.remove_asset_file(deleted)
+        self.assertFalse(path.exists())
+
+    def test_logo_rejects_corrupt_payload_and_dimensions(self):
+        class Corrupt:
+            filename = 'logo.png'
+            def read(self, size=-1):
+                return b'not-an-image'
+
+        with self.assertRaises(ValueError):
+            report_assets.sanitise_logo(Corrupt(), 10)
+
+        source = BytesIO()
+        Image.new('RGB', (4097, 1), (1, 2, 3)).save(source, format='PNG')
+        source.seek(0)
+
+        class TooWide:
+            filename = 'logo.png'
+            def read(self, size=-1):
+                return source.read(size)
+
+        with self.assertRaises(ValueError):
+            report_assets.sanitise_logo(TooWide(), 10)
 
 
 if __name__ == '__main__':

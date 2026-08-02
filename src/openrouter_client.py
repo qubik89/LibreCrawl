@@ -106,6 +106,95 @@ def generate_report_markdown(client, model, audit_packet, structured_findings, p
     return _generate(client, model, messages, model_metadata, {'max_tokens': 4000, 'temperature': 0.2})
 
 
+def generate_report_analysis(client, model, audit_facts, prompt_bundle, model_metadata=None):
+    """Generate the V2 evidence analysis as a JSON object response."""
+    messages = [
+        {'role': 'system', 'content': _system_prompt(prompt_bundle, 'audit_analysis_system_prompt')},
+        {'role': 'user', 'content': 'AuditFactsV2 JSON:\n' + _json_text(audit_facts)},
+    ]
+    return _generate(client, model, messages, model_metadata, {
+        'max_tokens': 6000,
+        'temperature': 0.1,
+        'response_format': {'type': 'json_object'},
+    })
+
+
+def generate_report_document(client, model, audit_facts, analysis, prompt_bundle, client_context=None,
+                             model_metadata=None):
+    """Generate the V2 editorial composition as JSON, never as presentation HTML."""
+    messages = [
+        {'role': 'system', 'content': _system_prompt(prompt_bundle, 'report_writer_system_prompt')},
+        {
+            'role': 'user',
+            'content': (
+                f"Report type: {prompt_bundle.get('report_type')}\n"
+                f"Commercial context: {prompt_bundle.get('commercial_context')}\n"
+                'Client context JSON:\n' + _json_text(client_context or {}) + '\n\n'
+                'Validated analysis JSON:\n' + _json_text(analysis) + '\n\n'
+                'AuditFactsV2 JSON:\n' + _json_text(audit_facts)
+            ),
+        },
+    ]
+    token_budget = {'executive': 6000, 'commercial': 9000, 'technical': 16000}.get(
+        prompt_bundle.get('report_type'), 6000
+    )
+    return _generate(client, model, messages, model_metadata, {
+        'max_tokens': token_budget,
+        'temperature': 0.15,
+        'response_format': {'type': 'json_object'},
+    })
+
+
+def generate_report_quality_review(client, model, audit_facts, analysis, document, prompt_bundle,
+                                   deterministic_review=None, model_metadata=None):
+    """Run an independent JSON-only review after deterministic validation."""
+    messages = [
+        {'role': 'system', 'content': _system_prompt(prompt_bundle, 'quality_review_system_prompt')},
+        {
+            'role': 'user',
+            'content': (
+                'Deterministic review JSON:\n' + _json_text(deterministic_review or {}) + '\n\n'
+                'Analysis JSON:\n' + _json_text(analysis) + '\n\n'
+                'Document JSON:\n' + _json_text(document) + '\n\n'
+                'AuditFactsV2 JSON:\n' + _json_text(audit_facts)
+            ),
+        },
+    ]
+    return _generate(client, model, messages, model_metadata, {
+        'max_tokens': 4000,
+        'temperature': 0,
+        'response_format': {'type': 'json_object'},
+    })
+
+
+def generate_report_repair(client, model, audit_facts, analysis, document, quality_review, prompt_bundle,
+                           client_context=None, model_metadata=None):
+    """Request the single permitted repair pass for one report package."""
+    messages = [
+        {'role': 'system', 'content': _system_prompt(prompt_bundle, 'repair_system_prompt')},
+        {
+            'role': 'user',
+            'content': (
+                f"Report type: {prompt_bundle.get('report_type')}\n"
+                f"Commercial context: {prompt_bundle.get('commercial_context')}\n"
+                'Client context JSON:\n' + _json_text(client_context or {}) + '\n\n'
+                'Quality issues JSON:\n' + _json_text(quality_review) + '\n\n'
+                'Current analysis JSON:\n' + _json_text(analysis) + '\n\n'
+                'Current document JSON:\n' + _json_text(document) + '\n\n'
+                'Immutable AuditFactsV2 JSON:\n' + _json_text(audit_facts)
+            ),
+        },
+    ]
+    token_budget = {'executive': 7000, 'commercial': 10000, 'technical': 18000}.get(
+        prompt_bundle.get('report_type'), 7000
+    )
+    return _generate(client, model, messages, model_metadata, {
+        'max_tokens': token_budget,
+        'temperature': 0,
+        'response_format': {'type': 'json_object'},
+    })
+
+
 def _generate(client, model, messages, model_metadata, desired_params):
     if model_metadata is None:
         model_metadata = reporting_settings.get_openrouter_model(model)

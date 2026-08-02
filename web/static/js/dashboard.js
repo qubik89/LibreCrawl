@@ -6,6 +6,13 @@ let activeReportCrawlId = null;
 let reportPollTimer = null;
 let reportActionsEnabled = false;
 let dashboardRefreshTimer = null;
+let reportWizardStep = 1;
+let reportPreflight = null;
+let reportClientLogoAssetId = '';
+// null means "let the server recommend the latest compatible baseline";
+// once the user touches the select, keep either an explicit crawl ID or the
+// sentinel "none" so disabling history remains an intentional choice.
+let reportBaselinePreference = null;
 
 function crawlStatusLabel(status) {
     return {
@@ -209,19 +216,32 @@ async function openReportModal(crawlId) {
     try {
         const settings = await getReportSettingsForGeneration();
         await getReportModelsForGeneration(settings);
+        const v2Enabled = settings.capabilities?.reports_v2_enabled === true;
+        const keyConfigured = settings.has_openrouter_api_key === true;
 
-        if (typeof window.populateReportModelSelect === 'function') {
-            window.populateReportModelSelect('reportGenerateModelSelect', settings.default_model || '', true);
-        }
-
-        setReportFieldValue('reportGenerateModelSelect', settings.default_model || '');
-        setReportFieldValue('reportGenerateManualModel', settings.manual_model || '');
         setReportFieldValue('reportGenerateLanguage', settings.default_language || 'es-ES');
-        setReportFieldValue('reportGenerateTone', settings.default_tone || 'executive');
-        setReportFieldValue('reportGenerateAgencyName', settings.agency_name || 'Mitmore SEO Crawl');
-        setReportFieldValue('reportGeneratePrimaryColor', settings.primary_color || '#2563eb');
-        setReportFieldValue('reportGenerateFooterText', settings.footer_text || '');
-        setReportFieldValue('reportGenerateLogoPath', settings.logo_path || '');
+        setReportMode(settings.default_report_mode || 'pack');
+        setReportFieldValue('reportGenerateCommercialContext', settings.default_commercial_context || 'prospect');
+        setReportFieldValue('reportGenerateClientName', '');
+        setReportFieldValue('reportGenerateTitle', '');
+        setReportFieldValue('reportGenerateMarket', '');
+        setReportFieldValue('reportGeneratePrimaryColor', settings.appearance?.primary_color || '#1d4ed8');
+        setReportFieldValue('reportGenerateSecondaryColor', settings.appearance?.secondary_color || '#334155');
+        setReportFieldValue('reportGenerateAccentColor', settings.appearance?.accent_color || '#b45309');
+        setReportFieldValue('reportGenerateAuthor', settings.issuer?.author || '');
+        setReportFieldValue('reportGenerateContact', settings.issuer?.contact || '');
+        setReportFieldValue('reportGenerateConfidentiality', settings.issuer?.confidentiality || '');
+        setReportFieldValue('reportGenerateCta', settings.issuer?.cta || '');
+        setReportFieldValue('reportGenerateGoals', '');
+        setReportFieldValue('reportGenerateBaseline', '');
+        setReportFieldValue('reportGenerateLogoChoice', settings.logo?.preview_url ? 'issuer' : 'none');
+        reportClientLogoAssetId = '';
+        const clientLogoGroup = document.getElementById('reportClientLogoGroup');
+        if (clientLogoGroup) clientLogoGroup.hidden = true;
+        reportWizardStep = 1;
+        reportPreflight = null;
+        reportBaselinePreference = null;
+        setReportWizardStep(1);
         setReportStatus('');
         await loadReportDownloadButtons(crawlId);
 
@@ -230,11 +250,21 @@ async function openReportModal(crawlId) {
 
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
-            generateBtn.disabled = false;
-            generateBtn.textContent = 'Generar PDF';
+            generateBtn.disabled = !v2Enabled || !keyConfigured;
+            generateBtn.textContent = 'Generar informe';
+        }
+        if (!v2Enabled) {
+            setReportStatus('Report Suite V2 está visible, pero aún no está activado en este entorno.', false);
+        } else if (!keyConfigured) {
+            setReportStatus('Configura una clave de OpenRouter en Ajustes del informe para generar.', true);
         }
 
         modal.style.display = 'flex';
+        const firstFocusable = modal.querySelector('button:not([hidden]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]');
+        if (firstFocusable) setTimeout(() => firstFocusable.focus(), 0);
+        // Load the factual preview immediately so the final-domain client
+        // name and recommended historical crawl are ready before step 2/3.
+        loadReportPreflight();
     } catch (error) {
         console.error('Error opening report modal:', error);
         reportDashboardNotice(error.message || 'No se pudieron cargar los ajustes de informes', 'error');
@@ -250,23 +280,220 @@ function closeReportModal() {
     }
 }
 
+document.addEventListener('click', event => {
+    const modal = document.getElementById('reportModal');
+    if (modal && event.target === modal) closeReportModal();
+});
+
+document.addEventListener('keydown', event => {
+    const modal = document.getElementById('reportModal');
+    if (!modal || modal.style.display !== 'flex') return;
+    if (event.key === 'Escape') {
+        closeReportModal();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(modal.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), a[href]'))
+        .filter(element => element.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
+
 function setReportFieldValue(id, value) {
     const element = document.getElementById(id);
     if (element) element.value = value;
 }
 
+function setReportMode(mode) {
+    document.querySelectorAll('input[name="reportGenerateReportMode"]').forEach(input => {
+        input.checked = input.value === mode;
+    });
+}
+
+function selectedReportMode() {
+    return document.querySelector('input[name="reportGenerateReportMode"]:checked')?.value || 'pack';
+}
+
+function setReportWizardStep(step) {
+    reportWizardStep = Math.max(1, Math.min(4, Number(step) || 1));
+    document.querySelectorAll('[data-wizard-panel]').forEach(panel => {
+        panel.classList.toggle('is-active', Number(panel.dataset.wizardPanel) === reportWizardStep);
+    });
+    document.querySelectorAll('[data-wizard-step]').forEach(button => {
+        const current = Number(button.dataset.wizardStep);
+        button.classList.toggle('is-active', current === reportWizardStep);
+        button.classList.toggle('is-complete', current < reportWizardStep);
+        if (current === reportWizardStep) button.setAttribute('aria-current', 'step');
+        else button.removeAttribute('aria-current');
+    });
+    const previous = document.getElementById('reportWizardPrev');
+    const next = document.getElementById('reportWizardNext');
+    const generate = document.getElementById('reportGenerateBtn');
+    if (previous) previous.hidden = reportWizardStep === 1;
+    if (next) { next.hidden = reportWizardStep === 4; next.textContent = reportWizardStep === 3 ? 'Revisar' : 'Continuar'; }
+    if (generate) generate.style.display = reportWizardStep === 4 ? 'inline-flex' : 'none';
+    if (reportWizardStep === 3 && !reportPreflight) loadReportPreflight();
+    if (reportWizardStep === 4) renderReportGenerationSummary();
+}
+
+async function advanceReportWizard() {
+    if (reportWizardStep === 2) {
+        setReportWizardStep(3);
+        return;
+    }
+    if (reportWizardStep === 3) {
+        if (!reportPreflight) await loadReportPreflight();
+        if (!reportPreflight) return;
+        setReportWizardStep(4);
+        return;
+    }
+    setReportWizardStep(reportWizardStep + 1);
+}
+
+async function loadReportPreflight() {
+    const panel = document.getElementById('reportPreflightPanel');
+    if (panel) panel.innerHTML = '<span class="report-loading">Calculando cobertura…</span>';
+    const types = selectedReportMode() === 'pack' ? 'executive,commercial,technical' : selectedReportMode();
+    try {
+        const model = reportSettings.manual_model || '';
+        const baselineQuery = reportBaselinePreference === null
+            ? ''
+            : `&baseline_crawl_id=${encodeURIComponent(reportBaselinePreference)}`;
+        const response = await fetch(`/api/crawls/${activeReportCrawlId}/report-preflight?report_types=${encodeURIComponent(types)}${model ? `&model=${encodeURIComponent(model)}` : ''}${baselineQuery}`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'No se pudo calcular la cobertura');
+        reportPreflight = data;
+        const clientName = document.getElementById('reportGenerateClientName');
+        if (clientName && !clientName.value && data.crawl?.domain) clientName.value = data.crawl.domain;
+        populateBaselineOptions(data.baseline);
+        renderReportPreflight(data);
+    } catch (error) {
+        reportPreflight = null;
+        if (panel) panel.innerHTML = `<p class="report-error">${safeReportText(error.message)}</p>`;
+        reportDashboardNotice(error.message || 'No se pudo calcular la cobertura', 'error');
+    }
+}
+
+function populateBaselineOptions(baseline) {
+    const select = document.getElementById('reportGenerateBaseline');
+    if (!select) return;
+    const selected = baseline?.selected_id || '';
+    select.innerHTML = '<option value="">Sin comparación histórica</option>';
+    (baseline?.candidates || []).forEach(candidate => {
+        const option = document.createElement('option');
+        option.value = candidate.id;
+        option.textContent = `${candidate.domain} · ${candidate.completed_at || 'Crawl anterior'}`;
+        option.selected = String(candidate.id) === String(selected);
+        select.appendChild(option);
+    });
+}
+
+function renderReportPreflight(data) {
+    const panel = document.getElementById('reportPreflightPanel');
+    if (!panel) return;
+    const denominators = data.coverage?.denominators || {};
+    const coverageRatio = data.coverage?.coverage_ratio == null
+        ? '—'
+        : `${Number(data.coverage.coverage_ratio).toLocaleString('es-ES', { maximumFractionDigits: 1 })}%`;
+    const sourceRows = (data.sources || []).map(source => `<div class="report-source-row"><span>${safeReportText(source.label)}</span><strong>${source.available ? 'Disponible' : 'No conectado'}</strong></div>`).join('');
+    const limitationRows = (data.coverage?.limitation_items || []).map(item => `<li>${safeReportText(item)}</li>`).join('');
+    const estimate = data.estimate || {};
+    const cost = estimate.pricing_available ? `$${estimate.normal_cost_usd}–$${estimate.maximum_cost_usd}` : 'Precio no disponible';
+    const historical = data.historical?.available ? 'Comparativa histórica disponible' : 'Sin comparativa histórica conectada';
+    panel.innerHTML = `
+        <div class="report-preflight-stats"><div><strong>${formatNumber(denominators.unique_urls || 0)}</strong><span>URLs únicas</span></div><div><strong>${formatNumber(denominators.html_2xx_urls || 0)}</strong><span>HTML 2xx</span></div><div><strong>${coverageRatio}</strong><span>Cobertura</span></div><div><strong>${data.coverage?.limitations || 0}</strong><span>Límites declarados</span></div></div>
+        <div class="report-source-list">${sourceRows}</div>
+        <div class="report-source-row"><span>Histórico</span><strong>${historical}</strong></div>
+        ${limitationRows ? `<div class="report-preflight-limitations"><span>Límites y contexto</span><ul>${limitationRows}</ul></div>` : ''}
+        <div class="report-preflight-estimate"><span>${estimate.normal_calls || 0} llamadas normales · ${estimate.maximum_calls || 0} máximo</span><strong>${cost}</strong></div>`;
+}
+
+function renderReportGenerationSummary() {
+    const summary = document.getElementById('reportGenerationSummary');
+    if (!summary) return;
+    const mode = selectedReportMode();
+    const estimate = reportPreflight?.estimate || {};
+    const baseline = document.getElementById('reportGenerateBaseline')?.selectedOptions?.[0]?.textContent || 'Sin comparación histórica';
+    summary.innerHTML = `<dl class="report-summary-list"><div><dt>Productos</dt><dd>${safeReportText(mode === 'pack' ? 'Ejecutivo · Comercial · Técnico' : reportToneLabel(mode))}</dd></div><div><dt>Dominio</dt><dd>${safeReportText(reportPreflight?.crawl?.domain || '')}</dd></div><div><dt>Histórico</dt><dd>${safeReportText(baseline)}</dd></div><div><dt>Modelo</dt><dd>${safeReportText(estimate.model || reportSettings.default_model || '')}</dd></div><div><dt>Uso previsto</dt><dd>${estimate.normal_calls || 0}–${estimate.maximum_calls || 0} llamadas · ${estimate.pricing_available ? `$${estimate.normal_cost_usd}–$${estimate.maximum_cost_usd}` : 'precio no disponible'}</dd></div></dl>`;
+}
+
 function reportGenerationPayloadFromModal() {
+    const mode = selectedReportMode();
+    const reportTypes = mode === 'pack' ? ['executive', 'commercial', 'technical'] : [mode];
+    const logoChoice = document.getElementById('reportGenerateLogoChoice')?.value || 'none';
     return {
-        model: document.getElementById('reportGenerateModelSelect')?.value || '',
-        manual_model: document.getElementById('reportGenerateManualModel')?.value || '',
         language: document.getElementById('reportGenerateLanguage')?.value || 'es-ES',
-        tone: document.getElementById('reportGenerateTone')?.value || 'executive',
-        agency_name: document.getElementById('reportGenerateAgencyName')?.value || '',
-        primary_color: document.getElementById('reportGeneratePrimaryColor')?.value || '#2563eb',
-        footer_text: document.getElementById('reportGenerateFooterText')?.value || '',
-        logo_path: document.getElementById('reportGenerateLogoPath')?.value || ''
+        report_mode: mode,
+        report_type: reportTypes[0],
+        report_types: reportTypes,
+        commercial_context: document.getElementById('reportGenerateCommercialContext')?.value || 'prospect',
+        baseline_crawl_id: document.getElementById('reportGenerateBaseline')?.value ? Number(document.getElementById('reportGenerateBaseline').value) : null,
+        use_v2: true,
+        brand_kit: {
+            client_name: document.getElementById('reportGenerateClientName')?.value || '',
+            primary_color: document.getElementById('reportGeneratePrimaryColor')?.value || '#1d4ed8',
+            secondary_color: document.getElementById('reportGenerateSecondaryColor')?.value || '#334155',
+            accent_color: document.getElementById('reportGenerateAccentColor')?.value || '#b45309',
+            logo_asset_id: logoChoice === 'issuer' ? (reportSettings.appearance?.logo_asset_id || '') : (logoChoice === 'client' ? reportClientLogoAssetId : '')
+        },
+        client_context: {
+            client_name: document.getElementById('reportGenerateClientName')?.value || '',
+            report_title: document.getElementById('reportGenerateTitle')?.value || '',
+            market: document.getElementById('reportGenerateMarket')?.value || '',
+            author: document.getElementById('reportGenerateAuthor')?.value || '',
+            contact: document.getElementById('reportGenerateContact')?.value || '',
+            confidentiality: document.getElementById('reportGenerateConfidentiality')?.value || '',
+            cta: document.getElementById('reportGenerateCta')?.value || '',
+            business_goals: document.getElementById('reportGenerateGoals')?.value || ''
+        }
     };
 }
+
+async function uploadReportClientLogo(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    const status = document.getElementById('reportClientLogoStatus');
+    try {
+        const response = await fetch('/api/report-assets/logo', { method: 'POST', body });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'No se pudo subir el logo');
+        reportClientLogoAssetId = data.asset.asset_id;
+        if (status) status.textContent = data.asset.original_name || 'Logo listo para este informe';
+    } catch (error) {
+        reportClientLogoAssetId = '';
+        if (status) status.textContent = error.message;
+        input.value = '';
+    }
+}
+
+document.addEventListener('change', event => {
+    if (event.target?.name === 'reportGenerateReportMode') {
+        reportPreflight = null;
+        if (reportWizardStep >= 3) loadReportPreflight();
+    }
+    if (event.target?.id === 'reportGenerateLogoChoice') {
+        const group = document.getElementById('reportClientLogoGroup');
+        if (group) group.hidden = event.target.value !== 'client';
+    }
+    if (event.target?.id === 'reportGenerateBaseline') {
+        // Refresh the factual preview for the selected historical crawl. The
+        // explicit `none` value lets the user disable comparison instead of
+        // silently receiving the automatic recommendation again.
+        reportBaselinePreference = event.target.value || 'none';
+        reportPreflight = null;
+        loadReportPreflight();
+    }
+});
 
 async function loadReportDownloadButtons(crawlId) {
     const container = document.getElementById('reportDownloadButtons');
@@ -287,8 +514,8 @@ function renderReportDownloadButtons(reports) {
     const container = document.getElementById('reportDownloadButtons');
     if (!container) return;
 
-    const completed = (reports || []).filter(report => report.status === 'completed' && report.download_url);
-    if (!completed.length) {
+    const visible = (reports || []).filter(report => report.status === 'completed' || report.status === 'failed');
+    if (!visible.length) {
         container.innerHTML = '';
         return;
     }
@@ -296,11 +523,13 @@ function renderReportDownloadButtons(reports) {
     container.innerHTML = `
         <div class="report-downloads-title">Descargas generadas</div>
         <div class="report-downloads-grid">
-            ${completed.map(report => `
-                <a class="report-download-btn" href="${safeReportText(report.download_url)}" target="_blank">
-                    <strong>${safeReportText(reportToneLabel(report.tone))}</strong>
-                    <span>${safeReportText(reportLanguageLabel(report.language))}</span>
-                </a>
+            ${visible.map(report => `
+                ${report.download_url ? `<a class="report-download-btn" href="${safeReportText(report.download_url)}" target="_blank">` : '<div class="report-download-btn report-download-failed">'}
+                    <strong>${safeReportText(reportToneLabel(report.report_type || report.tone))}</strong>
+                    <span>${safeReportText(reportLanguageLabel(report.language))}${report.quality_score != null ? ` · Calidad ${report.quality_score}/100` : ''}${report.cost_usd != null ? ` · $${report.cost_usd}` : ''}</span>
+                ${report.download_url ? '</a>' : '</div>'}
+                ${report.html_url ? `<a class="report-download-btn" href="${safeReportText(report.html_url)}" target="_blank"><strong>${safeReportText(reportToneLabel(report.report_type || report.tone))}</strong><span>HTML</span></a>` : ''}
+                ${report.quality_url ? `<a class="report-download-btn" href="${safeReportText(report.quality_url)}" target="_blank"><strong>${safeReportText(reportToneLabel(report.report_type || report.tone))}</strong><span>${report.status === 'failed' ? 'Diagnóstico QA' : 'Revisión QA'}</span></a>` : ''}
             `).join('')}
         </div>
     `;
@@ -308,6 +537,14 @@ function renderReportDownloadButtons(reports) {
 
 async function submitReportGeneration() {
     if (!activeReportCrawlId) return;
+    if (reportSettings.capabilities?.reports_v2_enabled !== true) {
+        setReportStatus('Report Suite V2 aún no está activado.', true);
+        return;
+    }
+    if (reportSettings.has_openrouter_api_key !== true) {
+        setReportStatus('Configura una clave de OpenRouter en Ajustes del informe.', true);
+        return;
+    }
 
     const generateBtn = document.getElementById('reportGenerateBtn');
     if (generateBtn) {
@@ -321,11 +558,20 @@ async function submitReportGeneration() {
 async function generateReportWithDefaults(crawlId) {
     try {
         const settings = await getReportSettingsForGeneration();
+        if (settings.capabilities?.reports_v2_enabled !== true) {
+            reportDashboardNotice('Report Suite V2 aún no está activado.', 'info');
+            return;
+        }
+        if (settings.has_openrouter_api_key !== true) {
+            reportDashboardNotice('Configura una clave de OpenRouter en Ajustes del informe.', 'info');
+            return;
+        }
         const model = settings.manual_model || settings.default_model || 'modelo guardado';
         const language = settings.default_language || 'es-ES';
-        const tone = settings.default_tone || 'executive';
-        if (!confirm(`¿Generar informe PDF con ${model}, ${language}, ${tone}?`)) return;
-        await createReport(crawlId, {}, false);
+        const mode = settings.default_report_mode || 'pack';
+        if (!confirm(`¿Generar ${mode === 'pack' ? 'el pack completo' : reportToneLabel(mode)} con ${model} en ${language}?`)) return;
+        const types = mode === 'pack' ? ['executive', 'commercial', 'technical'] : [mode];
+        await createReport(crawlId, { report_mode: mode, report_type: types[0], report_types: types, use_v2: true }, false);
     } catch (error) {
         console.error('Error generating report:', error);
         reportDashboardNotice(error.message || 'No se pudo generar el informe', 'error');
@@ -348,7 +594,7 @@ async function createReport(crawlId, payload, useModal) {
         if (!data.success) throw new Error(data.error || 'La generación del informe ha fallado');
 
         reportDashboardNotice('Generación del informe iniciada', 'success');
-        pollReportStatus(data.report_id, useModal);
+        pollReportStatuses(data.report_ids || [data.report_id], useModal);
     } catch (error) {
         console.error('Error creating report:', error);
         setReportStatus(error.message || 'La generación del informe ha fallado', true);
@@ -357,7 +603,7 @@ async function createReport(crawlId, payload, useModal) {
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generar PDF';
+            generateBtn.textContent = 'Generar informe';
         }
     }
 }
@@ -383,15 +629,16 @@ async function pollReportStatus(reportId, useModal) {
             reportPollTimer = null;
             setReportStatus(report.error || 'La generación del informe ha fallado', true);
             reportDashboardNotice('La generación del informe ha fallado', 'error');
+            if (useModal) loadReportDownloadButtons(activeReportCrawlId);
             const generateBtn = document.getElementById('reportGenerateBtn');
             if (generateBtn) {
                 generateBtn.disabled = false;
-                generateBtn.textContent = 'Generar PDF';
+                generateBtn.textContent = 'Generar informe';
             }
             return;
         }
 
-        setReportStatus(`Informe ${report.status || 'en cola'}...`);
+        setReportStatus(`Informe ${reportStageLabel(report.stage || report.status)}...`);
         reportPollTimer = setTimeout(() => pollReportStatus(reportId, useModal), 2000);
     } catch (error) {
         reportPollTimer = null;
@@ -401,9 +648,47 @@ async function pollReportStatus(reportId, useModal) {
         const generateBtn = document.getElementById('reportGenerateBtn');
         if (generateBtn) {
             generateBtn.disabled = false;
-            generateBtn.textContent = 'Generar PDF';
+            generateBtn.textContent = 'Generar informe';
         }
     }
+}
+
+async function pollReportStatuses(reportIds, useModal) {
+    const ids = [...new Set((reportIds || []).filter(Boolean))];
+    if (ids.length <= 1) return pollReportStatus(ids[0], useModal);
+    try {
+        const results = await Promise.all(ids.map(async id => {
+            const response = await fetch(`/api/reports/${id}/status`);
+            const data = await response.json();
+            if (!data.success) throw new Error(data.error || 'No se pudo consultar un informe');
+            return data.report || {};
+        }));
+        const terminal = results.every(report => ['completed', 'failed'].includes(report.status));
+        if (terminal) {
+            reportPollTimer = null;
+            const failed = results.filter(report => report.status === 'failed');
+            setReportStatus(failed.length ? `Pack terminado: ${failed.length} informe(s) requieren revisión.` : 'Pack de informes completado.', failed.length > 0);
+            if (!failed.length && results[0].download_url) showReportDownload(results[0].download_url);
+            if (useModal) loadReportDownloadButtons(activeReportCrawlId);
+            return;
+        }
+        const current = results.map(report => `${reportToneLabel(report.report_type || report.tone)}: ${reportStageLabel(report.stage || report.status)}`).join(' · ');
+        setReportStatus(current || 'Generando pack de informes...');
+        reportPollTimer = setTimeout(() => pollReportStatuses(ids, useModal), 2000);
+    } catch (error) {
+        reportPollTimer = null;
+        setReportStatus(error.message || 'La generación del pack ha fallado', true);
+        const generateBtn = document.getElementById('reportGenerateBtn');
+        if (generateBtn) { generateBtn.disabled = false; generateBtn.textContent = 'Generar informe'; }
+    }
+}
+
+function reportStageLabel(stage) {
+    return {
+        queued: 'en cola', facts: 'preparando hechos', analysis: 'analizando', writing: 'redactando',
+        quality: 'revisando calidad', repair: 'reparando', render: 'renderizando PDF', complete: 'completado',
+        completed: 'completado', failed: 'fallido', running: 'en curso'
+    }[stage] || stage || 'en cola';
 }
 
 function setReportStatus(message, isError = false) {

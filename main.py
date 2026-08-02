@@ -1,18 +1,20 @@
 import threading
 import time
 import csv
+import copy
 import json
 import xml.etree.ElementTree as ET
 import uuid
 import webbrowser
 import argparse
+import re
 import secrets
 import string
 import os
 import multiprocessing
 from io import StringIO
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode, urlsplit
 from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, send_file, stream_with_context
 from flask_compress import Compress
 from functools import wraps
@@ -206,6 +208,8 @@ def login_required(f):
 # Multi-tenant crawler instances
 crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'settings': SettingsManager, 'last_accessed': datetime}
 instances_lock = threading.Lock()
+dashboard_cache = {}
+dashboard_cache_lock = threading.Lock()
 
 def ensure_session_id():
     """Ensure the browser session has a stable id for settings and guest ownership."""
@@ -311,11 +315,23 @@ REPORT_SETTING_FIELDS = (
     'logo_path',
 )
 
+REPORT_PROFILE_FIELDS = (
+    'openrouter_api_key', 'default_model', 'manual_model', 'default_report_mode',
+    'default_commercial_context', 'default_language', 'issuer_name', 'default_author',
+    'default_contact', 'default_confidentiality', 'default_cta', 'primary_color',
+    'secondary_color', 'accent_color', 'logo_asset_id',
+)
+
 REPORT_BRANDING_FIELDS = ('agency_name', 'primary_color', 'footer_text', 'logo_path')
 REPORT_LANGUAGES = {'es-ES', 'en'}
-REPORT_TONES = {'executive', 'technical', 'commercial'}
+REPORT_TONES = {'executive', 'technical', 'commercial'}  # Legacy API alias for report_type.
+REPORT_TYPES = REPORT_TONES
+REPORT_MODES = {'pack', 'executive', 'technical', 'commercial'}
+REPORT_COMMERCIAL_CONTEXTS = {'prospect', 'existing_client'}
 REPORT_MODEL_PREFIXES = ('openai/', 'anthropic/', 'deepseek/')
 REPORT_MAX_FIELD_LENGTH = 500
+REPORT_MAX_LOGO_ASSET_ID_LENGTH = 64
+REPORTS_V2_ENABLED = os.getenv('REPORTS_V2_ENABLED', '').lower() in ('1', 'true', 'yes')
 
 
 def mask_openrouter_api_key(api_key):
@@ -328,13 +344,75 @@ def mask_openrouter_api_key(api_key):
     return f'{api_key[:4]}...{api_key[-4:]}'
 
 
-def public_report_settings(settings):
+def _is_masked_openrouter_key(value):
+    return bool(re.match(r'^[A-Za-z0-9_-]{4}\.\.\.[A-Za-z0-9_-]{4}$', str(value or '').strip()))
+
+
+def _white_label_issuer_name(value):
+    """Hide historical platform names from the V2 white-label surface."""
+    text = ''.join(char for char in str(value or '').lower() if char.isalnum())
+    if 'librecrawl' in text or 'mitmore' in text:
+        return ''
+    return str(value or '').strip()
+
+
+def _public_profile_color(value, fallback):
+    value = str(value or '').strip()
+    return value.lower() if re.match(r'^#[0-9a-fA-F]{6}$', value) else fallback
+
+
+def public_report_settings(settings, logo=None):
     """Return report settings without exposing the stored API key."""
-    public = dict(settings or {})
-    api_key = public.pop('openrouter_api_key', None)
+    source = settings or {}
+    # Whitelist the profile contract instead of echoing arbitrary persisted
+    # keys.  This keeps future connection references or migration metadata out
+    # of the public settings response by construction.
+    public = {
+        key: source.get(key)
+        for key in REPORT_PROFILE_FIELDS + ('default_tone', 'agency_name', 'footer_text')
+        if key in source
+    }
+    api_key = source.get('openrouter_api_key')
+    mode = public.get('default_report_mode') or public.get('default_tone') or 'pack'
+    if mode not in REPORT_MODES:
+        mode = 'pack'
+    issuer = {
+        'name': _white_label_issuer_name(public.get('issuer_name') or public.get('agency_name')),
+        'author': _white_label_issuer_name(public.get('default_author')),
+        'contact': _white_label_issuer_name(public.get('default_contact')),
+        'confidentiality': _white_label_issuer_name(public.get('default_confidentiality') or public.get('footer_text')),
+        'cta': _white_label_issuer_name(public.get('default_cta')),
+    }
+    appearance = {
+        'primary_color': _public_profile_color(public.get('primary_color'), '#1d4ed8'),
+        'secondary_color': _public_profile_color(public.get('secondary_color'), '#334155'),
+        'accent_color': _public_profile_color(public.get('accent_color'), '#b45309'),
+        # Only advertise an asset that still resolves through the authenticated
+        # ownership check performed by the route.
+        'logo_asset_id': (logo or {}).get('asset_id') or '',
+    }
     public['openrouter_api_key'] = ''
     public['has_openrouter_api_key'] = bool(api_key)
     public['masked_openrouter_api_key'] = mask_openrouter_api_key(api_key)
+    public['default_model'] = public.get('default_model') or 'anthropic/claude-opus-4.7'
+    public['default_language'] = public.get('default_language') or 'es-ES'
+    public['default_report_mode'] = mode
+    public['default_commercial_context'] = public.get('default_commercial_context') or 'prospect'
+    public['issuer'] = issuer
+    public['appearance'] = appearance
+    public['logo'] = logo
+    public['capabilities'] = {
+        'reports_v2_enabled': REPORTS_V2_ENABLED,
+        'quality_threshold': 90,
+        'report_types': ['executive', 'commercial', 'technical'],
+        'outputs': ['html', 'pdf'],
+        'external_sources': ['gsc', 'ga4', 'crux', 'pagespeed'],
+    }
+    # Deprecated response aliases for older clients.
+    public['default_tone'] = mode if mode in REPORT_TYPES else 'executive'
+    public['agency_name'] = issuer['name']
+    public['footer_text'] = issuer['confidentiality']
+    public['logo_path'] = ''
     return public
 
 
@@ -349,6 +427,56 @@ def report_settings_update_from_payload(payload):
         if field == 'openrouter_api_key' and not str(value or '').strip():
             continue
         update[field] = normalize_report_setting(field, value)
+    return update
+
+
+def report_profile_update_from_payload(payload):
+    """Validate a V2 profile while accepting old flat aliases."""
+    payload = payload or {}
+    issuer = payload.get('issuer') if isinstance(payload.get('issuer'), dict) else {}
+    appearance = payload.get('appearance') if isinstance(payload.get('appearance'), dict) else {}
+    update = {}
+    for field in ('openrouter_api_key', 'default_model', 'manual_model', 'default_report_mode',
+                  'default_commercial_context', 'default_language'):
+        value = payload.get(field)
+        if value is None and field == 'default_report_mode':
+            value = _first_nonblank(payload.get('default_tone'), payload.get('tone'))
+        if value is None:
+            continue
+        if field == 'openrouter_api_key' and _is_masked_openrouter_key(value):
+            # Browser clients may submit the displayed mask unchanged. Keep
+            # the server-side secret instead of replacing it with the mask.
+            continue
+        if field == 'openrouter_api_key' and not str(value).strip():
+            continue
+        if field == 'default_model' and not str(value).strip():
+            # A fresh profile may not have a cached model option yet. Do not
+            # replace the contractual Opus default with an empty value just
+            # because the settings form was saved before the cache refresh.
+            continue
+        update[field] = normalize_report_profile_setting(field, value)
+
+    aliases = {
+        # The UI keeps identity fields grouped under ``issuer`` while older
+        # clients still send the flat agency aliases.
+        'issuer_name': ('issuer_name', 'agency_name', 'name'),
+        'default_author': ('default_author',),
+        'default_contact': ('default_contact',),
+        'default_confidentiality': ('default_confidentiality', 'footer_text'),
+        'default_cta': ('default_cta',),
+        'primary_color': ('primary_color',),
+        'secondary_color': ('secondary_color',),
+        'accent_color': ('accent_color',),
+        'logo_asset_id': ('logo_asset_id',),
+    }
+    for field, keys in aliases.items():
+        value = next((issuer.get(key) for key in keys if issuer.get(key) is not None), None)
+        if value is None:
+            value = next((appearance.get(key) for key in keys if appearance.get(key) is not None), None)
+        if value is None:
+            value = next((payload.get(key) for key in keys if payload.get(key) is not None), None)
+        if value is not None:
+            update[field] = normalize_report_profile_setting(field, value)
     return update
 
 
@@ -370,8 +498,31 @@ def resolve_report_request_options(payload, settings):
     """Merge per-report overrides with saved report settings."""
     payload = payload or {}
     settings = settings or {}
+    if payload.get('use_v2') is True and not REPORTS_V2_ENABLED:
+        raise ValueError('Report Suite V2 no está habilitado en este entorno')
     language = normalize_report_language(_first_nonblank(payload.get('language'), settings.get('default_language')) or 'es-ES')
-    tone = normalize_report_tone(_first_nonblank(payload.get('tone'), settings.get('default_tone')) or 'executive')
+    # Explicitly non-V2 callers retain the legacy single-product behaviour.
+    # A new profile defaults to ``pack`` for the UI, but that default must not
+    # unexpectedly turn an old ``use_v2:false`` request into three jobs.
+    v2_requested = payload.get('use_v2') is True
+    if not v2_requested:
+        mode = _first_nonblank(
+            payload.get('tone'), payload.get('report_type'), payload.get('default_tone'), settings.get('default_tone'),
+        ) or 'executive'
+    else:
+        mode = _first_nonblank(
+            payload.get('report_mode'), payload.get('report_type'), payload.get('tone'), payload.get('default_tone'),
+            settings.get('default_report_mode'), settings.get('default_tone'),
+        ) or 'pack'
+    mode = str(mode)
+    if mode == 'pack':
+        report_type = 'executive'
+        report_types = _normalise_report_types(payload.get('report_types'), 'executive')
+        if payload.get('report_types') is None:
+            report_types = ['executive', 'commercial', 'technical']
+    else:
+        report_type = normalize_report_tone(mode)
+        report_types = _normalise_report_types(payload.get('report_types'), report_type)
     model = _first_nonblank(
         payload.get('manual_model'),
         payload.get('model'),
@@ -380,17 +531,117 @@ def resolve_report_request_options(payload, settings):
         settings.get('default_model'),
     )
     model = normalize_report_model(model) if model else None
+    issuer = payload.get('issuer') if isinstance(payload.get('issuer'), dict) else {}
     branding = {
-        field: _first_nonblank(payload.get(field), settings.get(field))
-        for field in REPORT_BRANDING_FIELDS
+        'agency_name': _first_nonblank(payload.get('issuer_name'), issuer.get('name'), settings.get('issuer_name'), settings.get('agency_name')),
+        'primary_color': _first_nonblank(payload.get('primary_color'), settings.get('primary_color')),
+        'secondary_color': _first_nonblank(payload.get('secondary_color'), settings.get('secondary_color')),
+        'accent_color': _first_nonblank(payload.get('accent_color'), settings.get('accent_color')),
+        'logo_asset_id': _first_nonblank(payload.get('logo_asset_id'), settings.get('logo_asset_id')),
     }
+    brand_kit = _safe_report_mapping(payload.get('brand_kit'), {
+        'client_name', 'primary_color', 'secondary_color', 'accent_color', 'logo_asset_id',
+        'logo_path', 'footer_text', 'font_family',
+    })
+    if payload.get('use_v2') is True and brand_kit.get('logo_path'):
+        raise ValueError('V2 logos must use an owned logo asset')
+    branding.update({key: value for key, value in brand_kit.items() if value})
+    if 'logo_asset_id' in brand_kit:
+        branding['logo_asset_id'] = brand_kit['logo_asset_id']
+    client_context = _safe_report_mapping(payload.get('client_context'), {
+        'client_name', 'report_title', 'author', 'confidentiality', 'contact',
+        'business_goals', 'cta', 'market',
+    })
+    for field, profile_key in {
+        'author': 'default_author', 'contact': 'default_contact',
+        'confidentiality': 'default_confidentiality', 'cta': 'default_cta',
+    }.items():
+        if not client_context.get(field) and settings.get(profile_key):
+            client_context[field] = settings[profile_key]
+    if brand_kit.get('client_name') and not client_context.get('client_name'):
+        client_context['client_name'] = brand_kit['client_name']
+    commercial_context = payload.get('commercial_context') or settings.get('default_commercial_context') or 'prospect'
+    if commercial_context not in REPORT_COMMERCIAL_CONTEXTS:
+        raise ValueError('Unsupported commercial context')
+    baseline_crawl_id = _normalise_optional_crawl_id(payload.get('baseline_crawl_id'))
+    enrichments = _safe_enrichments(payload.get('enrichments'))
     return {
         'language': language,
-        'tone': tone,
+        'tone': report_type,
+        'report_type': report_type,
+        'report_types': report_types,
         'model': model,
         'branding': branding,
+        'client_context': client_context,
+        'commercial_context': commercial_context,
+        'baseline_crawl_id': baseline_crawl_id,
+        'enrichments': enrichments,
+        'use_v2': bool(payload.get('use_v2', False)) and REPORTS_V2_ENABLED,
         'openrouter_api_key': settings.get('openrouter_api_key'),
     }
+
+
+def _normalise_report_types(value, default):
+    if value is None:
+        return [default]
+    if not isinstance(value, list) or not value:
+        raise ValueError('report_types must be a non-empty list')
+    result = []
+    for item in value:
+        report_type = normalize_report_tone(item)
+        if report_type not in result:
+            result.append(report_type)
+    return result
+
+
+def _safe_report_mapping(value, allowed):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError('Report context must be an object')
+    result = {}
+    for key, item in value.items():
+        if key not in allowed or item is None:
+            continue
+        text = str(item).strip()
+        if len(text) > REPORT_MAX_FIELD_LENGTH:
+            raise ValueError(f'{key} is too long')
+        result[key] = text
+    return result
+
+
+def _normalise_optional_crawl_id(value):
+    if value in (None, ''):
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ValueError('baseline_crawl_id must be an integer') from None
+    if value < 1:
+        raise ValueError('baseline_crawl_id must be positive')
+    return value
+
+
+def _safe_enrichments(value):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError('enrichments must be an object')
+    result = {}
+    for source in ('gsc', 'ga4', 'crux', 'pagespeed'):
+        item = value.get(source)
+        if item is None:
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f'{source} enrichment must be an object')
+        # Jobs receive a source reference only. Enrichment payloads already
+        # stored for the crawl are loaded server-side and never accepted from
+        # this request, preventing credentials from entering a job contract.
+        safe = {key: item[key] for key in ('status', 'connection_id') if key in item}
+        if 'connection_id' in safe and len(str(safe['connection_id'])) > REPORT_MAX_FIELD_LENGTH:
+            raise ValueError('connection_id is too long')
+        result[source] = safe
+    return result
 
 
 def normalize_report_setting(field, value):
@@ -406,6 +657,32 @@ def normalize_report_setting(field, value):
         return normalize_report_tone(value)
     if field in ('default_model', 'manual_model') and value:
         return normalize_report_model(value)
+    return value
+
+
+def normalize_report_profile_setting(field, value):
+    value = '' if value is None else str(value).strip()
+    if field != 'openrouter_api_key' and len(value) > REPORT_MAX_FIELD_LENGTH:
+        raise ValueError(f'{field} is too long')
+    if field == 'default_language':
+        return normalize_report_language(value)
+    if field == 'default_report_mode':
+        if value not in REPORT_MODES:
+            raise ValueError('Unsupported report mode')
+        return value
+    if field == 'default_commercial_context':
+        if value not in REPORT_COMMERCIAL_CONTEXTS:
+            raise ValueError('Unsupported commercial context')
+        return value
+    if field in ('default_model', 'manual_model') and value:
+        return normalize_report_model(value)
+    if field in ('primary_color', 'secondary_color', 'accent_color'):
+        if not re.match(r'^#[0-9a-fA-F]{6}$', value):
+            raise ValueError(f'{field} must be a six-digit hex colour')
+        return value.lower()
+    if field == 'logo_asset_id' and value:
+        if len(value) > REPORT_MAX_LOGO_ASSET_ID_LENGTH or not re.match(r'^[a-f0-9]+$', value):
+            raise ValueError('Invalid logo asset')
     return value
 
 
@@ -450,6 +727,24 @@ def combine_report_usage(*usage_items):
     return {'calls': calls, 'total': totals} if calls else None
 
 
+def report_usage_cost(model_metadata, usage):
+    """Calculate actual provider cost only when cached pricing is known."""
+    pricing = (model_metadata or {}).get('pricing') or {}
+    try:
+        prompt_price = float(pricing.get('prompt'))
+        completion_price = float(pricing.get('completion'))
+    except (TypeError, ValueError):
+        return None
+    totals = (usage or {}).get('total') if isinstance(usage, dict) else {}
+    totals = totals or {}
+    prompt_tokens = totals.get('prompt_tokens', totals.get('input_tokens', 0)) or 0
+    completion_tokens = totals.get('completion_tokens', totals.get('output_tokens', 0)) or 0
+    try:
+        return round(float(prompt_tokens) * prompt_price + float(completion_tokens) * completion_price, 6)
+    except (TypeError, ValueError):
+        return None
+
+
 def report_access_context(report_id, user_id, session_id):
     """Return (job, crawl, allowed) for report endpoints."""
     from src.reporting_jobs import get_report_job
@@ -462,26 +757,52 @@ def report_access_context(report_id, user_id, session_id):
     return job, crawl, user_can_access_crawl(crawl, user_id, session_id)
 
 
+def _public_report_error(value):
+    if not value:
+        return None
+    text = str(value)
+    text = re.sub(r'\bsk-[A-Za-z0-9._-]+', '[clave redacted]', text)
+    text = re.sub(r'(?<![A-Za-z0-9])/(?:[^\s,;]+)', '[ruta interna redacted]', text)
+    return text[:500]
+
+
 def public_report_job(job):
     """Return report job fields safe for API responses."""
     if not job:
         return None
     has_pdf = bool(job.get('pdf_path'))
+    has_html = bool(job.get('html_path'))
+    has_quality = bool(job.get('quality_path'))
+    has_manifest = bool(job.get('manifest_path'))
+    terminal = job.get('status') in {'completed', 'failed'}
     download_url = f"/api/reports/{job.get('id')}/download" if has_pdf and job.get('status') == 'completed' else None
     return {
         'id': job.get('id'),
         'crawl_id': job.get('crawl_id'),
         'status': job.get('status'),
+        'stage': job.get('stage') or job.get('status') or 'queued',
         'language': job.get('language'),
         'tone': job.get('tone'),
+        'report_type': job.get('report_type') or job.get('tone'),
+        'commercial_context': job.get('commercial_context') or 'prospect',
+        'pack_id': job.get('pack_id'),
+        'template_version': job.get('template_version') or '1.0',
         'model': job.get('model'),
-        'error': job.get('error') if job.get('status') == 'failed' else None,
+        'error': _public_report_error(job.get('error')) if job.get('status') == 'failed' else None,
         'created_at': job.get('created_at'),
         'updated_at': job.get('updated_at'),
         'completed_at': job.get('completed_at'),
         'usage': job.get('usage'),
+        'cost_usd': job.get('cost_usd'),
+        'quality_score': job.get('quality_score'),
+        'quality_passed': bool(job.get('quality_passed')) if job.get('quality_passed') is not None else None,
+        'repair_attempted': bool(job.get('repair_attempted')) if job.get('repair_attempted') is not None else None,
         'has_pdf': has_pdf,
+        'has_html': has_html,
         'download_url': download_url,
+        'html_url': f"/api/reports/{job.get('id')}/artifact/html" if has_html and job.get('status') == 'completed' else None,
+        'quality_url': f"/api/reports/{job.get('id')}/artifact/quality" if has_quality and terminal else None,
+        'manifest_url': f"/api/reports/{job.get('id')}/artifact/manifest" if has_manifest and terminal else None,
     }
 
 
@@ -503,18 +824,41 @@ def safe_report_pdf_path(job):
     return path
 
 
-def run_report_job(report_id, crawl_id, options):
+def safe_report_artifact_path(job, artifact):
+    """Return a verified report artifact path without exposing server paths."""
+    from pathlib import Path
+    from src.reporting_pdf import DEFAULT_REPORTS_BASE_DIR
+
+    fields = {
+        'html': 'html_path', 'facts': 'facts_path', 'analysis': 'analysis_path',
+        'document': 'document_path', 'quality': 'quality_path', 'manifest': 'manifest_path',
+    }
+    field = fields.get(artifact)
+    if not field or not job or not job.get(field):
+        return None
+    path = Path(job[field]).resolve()
+    base = DEFAULT_REPORTS_BASE_DIR.resolve()
+    try:
+        return path if path.is_relative_to(base) else None
+    except AttributeError:
+        return path if base in path.parents or path == base else None
+
+
+def run_report_job(report_id, crawl_id, options, shared_facts=None, shared_analysis=None, shared_analysis_usage=None):
     """Generate one report in a background worker."""
     from src.reporting_jobs import update_report_job
 
     try:
         update_report_job(report_id, status='running')
+        update_report_job(report_id, stage='facts')
 
-        from src.openrouter_client import (
-            OpenRouterClient,
-            generate_report_markdown,
-            generate_structured_findings,
-        )
+        if options.get('use_v2'):
+            _run_report_job_v2(
+                report_id, crawl_id, options, shared_facts, shared_analysis, shared_analysis_usage
+            )
+            return
+
+        from src.openrouter_client import OpenRouterClient, generate_report_markdown, generate_structured_findings
         from src.reporting_data import build_audit_packet
         from src.reporting_pdf import render_report_html, render_report_pdf, report_output_paths
         from src.reporting_prompts import get_prompt_bundle
@@ -526,9 +870,11 @@ def run_report_job(report_id, crawl_id, options):
         model_metadata = get_openrouter_model(model)
         client = OpenRouterClient(options['openrouter_api_key'])
 
+        update_report_job(report_id, stage='analysis')
         findings, findings_usage = generate_structured_findings(
             client, model, audit_packet, prompt_bundle, model_metadata
         )
+        update_report_job(report_id, stage='writing')
         markdown_text, report_usage = generate_report_markdown(
             client, model, audit_packet, findings, prompt_bundle, model_metadata
         )
@@ -543,18 +889,310 @@ def run_report_job(report_id, crawl_id, options):
             audit_packet=audit_packet,
         )
         paths['html'].write_text(html, encoding='utf-8')
+        update_report_job(report_id, stage='render')
         render_report_pdf(html, paths['pdf'])
 
         update_report_job(
             report_id,
             status='completed',
+            stage='complete',
             markdown_path=str(paths['markdown']),
             html_path=str(paths['html']),
             pdf_path=str(paths['pdf']),
             usage=combine_report_usage(findings_usage, report_usage),
+            cost_usd=report_usage_cost(model_metadata, combine_report_usage(findings_usage, report_usage)),
         )
     except Exception as exc:
-        update_report_job(report_id, status='failed', error=str(exc))
+        # Persist the diagnostic in the same redacted form exposed by the API;
+        # provider exceptions must never turn a job row into a secret sink.
+        update_report_job(
+            report_id,
+            status='failed',
+            stage='failed',
+            error=_public_report_error(str(exc)) or 'Report generation failed',
+        )
+
+
+def run_report_quality_cycle(client, model, model_metadata, facts, analysis, document, prompt_bundle,
+                             client_context=None, stage_callback=None):
+    """Run deterministic QA, independent review, and at most one repair."""
+    from src.openrouter_client import generate_report_quality_review, generate_report_repair
+    from src.reporting_documents import (
+        merge_quality_reviews, normalise_quality_review, normalise_repair, parse_json_response,
+        validate_report_package,
+    )
+
+    usage = []
+    if stage_callback:
+        stage_callback('quality')
+    deterministic_before = validate_report_package(facts, analysis, document)
+    review_text, review_usage = generate_report_quality_review(
+        client, model, facts, analysis, document, prompt_bundle, deterministic_before, model_metadata,
+    )
+    if review_usage:
+        usage.append(review_usage)
+    try:
+        model_before = normalise_quality_review(parse_json_response(review_text))
+    except ValueError as exc:
+        model_before = _failed_quality_review(f'Invalid independent review JSON: {exc}')
+    combined_before = merge_quality_reviews(deterministic_before, model_before)
+
+    repaired = False
+    repair_error = None
+    repair_usage = None
+    deterministic_after = deterministic_before
+    model_after = model_before
+    combined_after = combined_before
+    if not combined_before['passed']:
+        repaired = True
+        if stage_callback:
+            stage_callback('repair')
+        repair_text, repair_usage = generate_report_repair(
+            client, model, facts, analysis, document, combined_before, prompt_bundle,
+            client_context, model_metadata,
+        )
+        if repair_usage:
+            usage.append(repair_usage)
+        try:
+            analysis, document = normalise_repair(
+                parse_json_response(repair_text), facts, prompt_bundle['report_type'],
+                prompt_bundle['language'], prompt_bundle['commercial_context'], client_context,
+            )
+        except ValueError as exc:
+            repair_error = f'Invalid repair JSON: {exc}'
+
+        deterministic_after = validate_report_package(facts, analysis, document)
+        if repair_error:
+            deterministic_after = _quality_review_with_failure(deterministic_after, repair_error)
+        final_text, final_usage = generate_report_quality_review(
+            client, model, facts, analysis, document, prompt_bundle, deterministic_after, model_metadata,
+        )
+        if final_usage:
+            usage.append(final_usage)
+        try:
+            model_after = normalise_quality_review(parse_json_response(final_text))
+        except ValueError as exc:
+            model_after = _failed_quality_review(f'Invalid final review JSON: {exc}')
+        combined_after = merge_quality_reviews(deterministic_after, model_after)
+
+    quality = {
+        'prompt_version': prompt_bundle.get('prompt_version', '2.1'),
+        'initial': {
+            'deterministic': deterministic_before,
+            'model': model_before,
+            'combined': combined_before,
+        },
+        'repair': {'attempted': repaired, 'error': repair_error},
+        'final': {
+            'deterministic': deterministic_after,
+            'model': model_after,
+            'combined': combined_after,
+        },
+    }
+    return analysis, document, quality, usage
+
+
+def _failed_quality_review(message):
+    return {
+        'verdict': 'fail', 'passed': False, 'score': 0,
+        'issues': [{
+            'code': 'quality-review-invalid', 'severity': 'critical', 'target': 'document',
+            'target_id': None, 'message': message,
+            'repair_instruction': 'Repeat the independent review with valid contract JSON.', 'source': 'model',
+        }],
+    }
+
+
+def _quality_review_with_failure(review, message):
+    result = dict(review)
+    result['issues'] = list(review.get('issues') or []) + [{
+        'code': 'repair-invalid', 'severity': 'critical', 'target': 'document', 'target_id': None,
+        'message': message, 'repair_instruction': 'Produce a valid repair object.', 'source': 'deterministic',
+    }]
+    result.update({'verdict': 'fail', 'passed': False, 'score': 0})
+    return result
+
+
+def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_analysis=None, shared_analysis_usage=None):
+    """Generate one V2 document from shared facts and a JSON-only model contract."""
+    from src.openrouter_client import OpenRouterClient, generate_report_analysis, generate_report_document
+    from src.reporting_documents import (
+        document_markdown, fallback_analysis, normalise_analysis, normalise_document, parse_json_response,
+    )
+    from src.reporting_pdf import render_report_document_html, render_report_pdf, report_output_paths
+    from src.reporting_prompts import get_prompt_bundle
+    from src.reporting_settings import get_openrouter_model
+    from src.reporting_v2 import build_audit_facts
+    from src.reporting_jobs import update_report_job
+
+    facts = shared_facts or build_audit_facts(
+        crawl_id,
+        baseline_crawl_id=options.get('baseline_crawl_id'),
+        enrichments=options.get('enrichments'),
+    )
+    model = options['model']
+    model_metadata = get_openrouter_model(model)
+    client = OpenRouterClient(options['openrouter_api_key'])
+    update_report_job(report_id, stage='analysis')
+    analysis_usage = shared_analysis_usage
+    analysis = copy.deepcopy(shared_analysis) if shared_analysis is not None else None
+    if analysis is None:
+        analysis_bundle = get_prompt_bundle(options['language'], 'executive')
+        analysis_text, analysis_usage = generate_report_analysis(client, model, facts, analysis_bundle, model_metadata)
+        try:
+            analysis = normalise_analysis(parse_json_response(analysis_text), facts, options['language'])
+        except ValueError:
+            analysis = fallback_analysis(facts, options['language'])
+            analysis.setdefault('limitations', []).append(
+                'The automated analysis did not return valid JSON; deterministic prioritisation was applied.'
+                if options['language'] == 'en'
+                else 'El análisis automático no devolvió JSON válido; se aplicó una priorización determinista.'
+            )
+
+    prompt_bundle = get_prompt_bundle(
+        options['language'], options.get('report_type') or options['tone'], options.get('commercial_context'),
+    )
+    update_report_job(report_id, stage='writing')
+    document_text, document_usage = generate_report_document(
+        client, model, facts, analysis, prompt_bundle, options.get('client_context'), model_metadata,
+    )
+    try:
+        document = normalise_document(
+            parse_json_response(document_text), facts, analysis, prompt_bundle['report_type'],
+            options['language'], options.get('commercial_context'), options.get('client_context'),
+        )
+    except ValueError:
+        document = normalise_document(
+            None, facts, analysis, prompt_bundle['report_type'], options['language'],
+            options.get('commercial_context'), options.get('client_context'),
+        )
+        analysis.setdefault('limitations', []).append(
+            'The automated document did not return valid JSON; deterministic editorial composition was applied.'
+            if options['language'] == 'en'
+            else 'La redacción automática no devolvió JSON válido; se aplicó la composición editorial determinista.'
+        )
+
+    analysis, document, quality, quality_usage = run_report_quality_cycle(
+        client, model, model_metadata, facts, analysis, document, prompt_bundle,
+        options.get('client_context'), lambda stage: update_report_job(report_id, stage=stage),
+    )
+
+    paths = report_output_paths(crawl_id, report_id, language=options['language'], tone=prompt_bundle['report_type'])
+    paths['dir'].mkdir(parents=True, exist_ok=True)
+    paths['facts'].write_text(json.dumps(facts, ensure_ascii=False, indent=2), encoding='utf-8')
+    paths['analysis'].write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding='utf-8')
+    paths['document'].write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding='utf-8')
+    paths['quality'].write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding='utf-8')
+    final_quality = quality['final']['combined']
+    manifest = {
+        'template_version': '2.0', 'facts_version': facts.get('schema_version'),
+        'report_type': prompt_bundle['report_type'], 'language': options['language'],
+        'model': model, 'crawl_id': crawl_id, 'baseline_crawl_id': options.get('baseline_crawl_id'),
+        'prompt_version': prompt_bundle.get('prompt_version', '2.1'), 'quality_score': final_quality['score'],
+        'quality_passed': final_quality['passed'], 'repair_attempted': quality['repair']['attempted'],
+    }
+    combined_usage = combine_report_usage(analysis_usage, document_usage, *quality_usage)
+    actual_cost = report_usage_cost(model_metadata, combined_usage)
+    manifest['usage'] = combined_usage
+    manifest['cost_usd'] = actual_cost
+    paths['manifest'].write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    if not final_quality['passed']:
+        error = (
+            f"The report did not pass quality control ({final_quality['score']}/100)."
+            if options['language'] == 'en'
+            else f"El informe no superó el control de calidad ({final_quality['score']}/100)."
+        )
+        update_report_job(
+            report_id, status='failed', stage='failed', error=error,
+            report_type=prompt_bundle['report_type'], commercial_context=options.get('commercial_context'),
+            template_version='2.0', facts_path=str(paths['facts']), analysis_path=str(paths['analysis']),
+            document_path=str(paths['document']), quality_path=str(paths['quality']),
+            manifest_path=str(paths['manifest']), usage=combined_usage,
+            cost_usd=actual_cost,
+            quality_score=final_quality['score'], quality_passed=0,
+            repair_attempted=int(quality['repair']['attempted']),
+        )
+        return
+    paths['markdown'].write_text(document_markdown(document, analysis), encoding='utf-8')
+    html = render_report_document_html(document, analysis, facts, options.get('branding'))
+    paths['html'].write_text(html, encoding='utf-8')
+    update_report_job(report_id, stage='render')
+    render_report_pdf(html, paths['pdf'])
+    update_report_job(
+        report_id,
+        status='completed', stage='complete',
+        report_type=prompt_bundle['report_type'],
+        commercial_context=options.get('commercial_context'),
+        template_version='2.0',
+        markdown_path=str(paths['markdown']), html_path=str(paths['html']), pdf_path=str(paths['pdf']),
+        facts_path=str(paths['facts']), analysis_path=str(paths['analysis']),
+        document_path=str(paths['document']), quality_path=str(paths['quality']), manifest_path=str(paths['manifest']),
+        usage=combined_usage, quality_score=final_quality['score'], quality_passed=1,
+        cost_usd=actual_cost,
+        repair_attempted=int(quality['repair']['attempted']),
+    )
+
+
+def run_report_pack(crawl_id, jobs):
+    """Generate one analysis for a pack, then compose every audience variant."""
+    if not jobs:
+        return
+    shared_options = jobs[0][1]
+    from src.reporting_jobs import update_report_job
+    for report_id, _ in jobs:
+        update_report_job(report_id, status='running', stage='facts')
+    facts = None
+    analysis = None
+    analysis_usage = None
+    try:
+        from src.reporting_v2 import build_audit_facts
+        facts = build_audit_facts(
+            crawl_id, baseline_crawl_id=shared_options.get('baseline_crawl_id'),
+            enrichments=shared_options.get('enrichments'),
+        )
+    except Exception:
+        # The individual worker will surface a normal failed job if the
+        # immutable facts snapshot itself cannot be built.
+        facts = None
+
+    if facts is not None:
+        try:
+            from src.openrouter_client import OpenRouterClient, generate_report_analysis
+            from src.reporting_documents import fallback_analysis, normalise_analysis, parse_json_response
+            from src.reporting_prompts import get_prompt_bundle
+            from src.reporting_settings import get_openrouter_model
+
+            client = OpenRouterClient(shared_options['openrouter_api_key'])
+            raw_analysis, analysis_usage = generate_report_analysis(
+                client, shared_options['model'], facts,
+                get_prompt_bundle(shared_options['language'], 'executive'),
+                get_openrouter_model(shared_options['model']),
+            )
+            try:
+                analysis = normalise_analysis(parse_json_response(raw_analysis), facts, shared_options['language'])
+            except ValueError:
+                analysis = fallback_analysis(facts, shared_options['language'])
+                limitation = (
+                    'The shared analysis did not return valid JSON; deterministic prioritisation was applied.'
+                    if shared_options['language'] == 'en'
+                    else 'El análisis compartido no devolvió JSON válido; se aplicó una priorización determinista.'
+                )
+                analysis.setdefault('limitations', []).append(limitation)
+        except Exception:
+            # Keep the single facts snapshot and let each product use its
+            # deterministic analysis fallback instead of issuing three model
+            # analysis calls.
+            analysis = fallback_analysis(facts, shared_options['language'])
+            analysis.setdefault('limitations', []).append(
+                'The shared analysis service was unavailable; deterministic prioritisation was applied.'
+                if shared_options['language'] == 'en'
+                else 'El servicio de análisis compartido no estaba disponible; se aplicó una priorización determinista.'
+            )
+    if facts is not None:
+        for report_id, _ in jobs:
+            update_report_job(report_id, stage='analysis')
+    for report_id, options in jobs:
+        run_report_job(report_id, crawl_id, options, facts, analysis, analysis_usage)
 
 def get_or_create_crawler():
     """Get or create a crawler instance for the current session"""
@@ -1023,43 +1661,336 @@ def debug_memory_page():
 @app.route('/api/report-settings')
 @login_required
 def get_report_settings():
-    """Return report settings without exposing the OpenRouter API key."""
+    """Return the authenticated user's report profile without exposing secrets."""
     if not current_user_can_use_reports():
         return report_feature_forbidden()
     try:
-        from src.reporting_settings import get_reporting_settings
 
+        user_id = session.get('user_id')
+        profile = _get_report_profile(user_id)
+        logo = get_report_asset(profile.get('logo_asset_id'), user_id)
+        if logo:
+            logo = {
+                'asset_id': logo['asset_id'], 'mime_type': logo['mime_type'],
+                'original_name': logo.get('original_name'),
+                'preview_url': f"/api/report-assets/logo/{logo['asset_id']}",
+            }
         return jsonify({
             'success': True,
-            'settings': public_report_settings(get_reporting_settings()),
+            'settings': public_report_settings(profile, logo),
         })
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudieron cargar los ajustes de informes'}), 500
 
 
 @app.route('/api/report-settings', methods=['POST'])
 @login_required
 def save_report_settings():
-    """Save report settings, preserving a blank/missing API key."""
+    """Save the authenticated user's report profile."""
     if not current_user_can_use_reports():
         return report_feature_forbidden()
     try:
-        from src.reporting_settings import get_reporting_settings, save_reporting_settings
+        from src.reporting_settings import save_user_reporting_settings, get_report_asset
 
         payload = request_json_object()
-        update = report_settings_update_from_payload(payload)
+        update = report_profile_update_from_payload(payload)
+        if update.get('logo_asset_id') and not get_report_asset(update['logo_asset_id'], session.get('user_id')):
+            return jsonify({'success': False, 'error': 'Logo no encontrado o no autorizado'}), 400
         if update:
-            save_reporting_settings(update)
+            save_user_reporting_settings(session.get('user_id'), update)
+        profile = _get_report_profile(session.get('user_id'))
+        logo = get_report_asset(profile.get('logo_asset_id'), session.get('user_id'))
+        logo = {
+            'asset_id': logo['asset_id'], 'mime_type': logo['mime_type'],
+            'original_name': logo.get('original_name'),
+            'preview_url': f"/api/report-assets/logo/{logo['asset_id']}",
+        } if logo else None
         return jsonify({
             'success': True,
-            'settings': public_report_settings(get_reporting_settings()),
+            'settings': public_report_settings(profile, logo),
         })
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudieron guardar los ajustes de informes'}), 500
+
+
+def _is_sole_admin(user_id):
+    """Allow legacy profile migration only when ownership is unambiguous."""
+    try:
+        from src.auth_db import get_all_users
+        admins = [row for row in (get_all_users() or []) if row.get('tier') == 'admin']
+        return len(admins) == 1 and str(admins[0].get('id')) == str(user_id)
+    except Exception:
+        return False
+
+
+def _get_report_profile(user_id):
+    """Load a user profile, with a read-only legacy fallback during migration."""
+    from src.reporting_settings import DEFAULT_REPORTING_PROFILE, get_reporting_settings, get_user_reporting_settings
+
+    try:
+        return get_user_reporting_settings(user_id, migrate_legacy=_is_sole_admin(user_id))
+    except Exception:
+        legacy = get_reporting_settings()
+        profile = dict(DEFAULT_REPORTING_PROFILE)
+        profile.update({key: value for key, value in legacy.items() if value not in (None, '')})
+        return profile
+
+
+@app.route('/api/report-assets/logo', methods=['POST'])
+@login_required
+def upload_report_logo():
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.reporting_settings import create_report_asset
+        from src.report_assets import sanitise_logo
+
+        path, mime_type, original_name = sanitise_logo(request.files.get('file'), session.get('user_id'))
+        asset_id = create_report_asset(session.get('user_id'), path, mime_type, original_name)
+        return jsonify({
+            'success': True,
+            'asset': {
+                'asset_id': asset_id, 'mime_type': mime_type, 'original_name': original_name,
+                'preview_url': f'/api/report-assets/logo/{asset_id}',
+            },
+        })
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 503
+    except Exception as exc:
+        return jsonify({'success': False, 'error': 'No se pudo procesar el logo'}), 500
+
+
+@app.route('/api/report-assets/logo/<asset_id>')
+@login_required
+def preview_report_logo(asset_id):
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from pathlib import Path
+        from src.reporting_settings import get_report_asset
+
+        asset = get_report_asset(asset_id, session.get('user_id'))
+        if not asset or not Path(asset['file_path']).is_file():
+            return jsonify({'success': False, 'error': 'Logo no encontrado'}), 404
+        return send_file(asset['file_path'], mimetype=asset['mime_type'], as_attachment=False)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': 'No se pudo cargar el logo'}), 500
+
+
+@app.route('/api/report-assets/logo/<asset_id>', methods=['DELETE'])
+@login_required
+def delete_report_logo(asset_id):
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.report_assets import remove_asset_file
+        from src.reporting_settings import delete_report_asset, get_user_reporting_settings, save_user_reporting_settings
+
+        profile = get_user_reporting_settings(session.get('user_id'))
+        path = delete_report_asset(asset_id, session.get('user_id'))
+        if not path:
+            return jsonify({'success': False, 'error': 'Logo no encontrado'}), 404
+        remove_asset_file(path)
+        # Avoid leaving a stale default reference after deleting the asset that
+        # is actually selected as the issuer logo. Client logos may be kept for
+        # another report and must not clear the issuer profile.
+        if profile.get('logo_asset_id') == asset_id:
+            save_user_reporting_settings(session.get('user_id'), {'logo_asset_id': None})
+        return jsonify({'success': True})
+    except Exception as exc:
+        return jsonify({'success': False, 'error': 'No se pudo eliminar el logo'}), 500
+
+
+def _report_domain(crawl):
+    value = str(
+        (crawl or {}).get('final_domain')
+        or (crawl or {}).get('final_url')
+        or (crawl or {}).get('base_domain')
+        or (crawl or {}).get('base_url')
+        or ''
+    ).strip().lower()
+    if '://' in value:
+        value = urlsplit(value).hostname or value
+    value = value.split(':', 1)[0].rstrip('.')
+    return value[4:] if value.startswith('www.') else value
+
+
+def _crawl_is_prior(candidate, current):
+    """Return whether a compatible crawl predates the current crawl.
+
+    Older metadata rows may not have timestamps, so missing or malformed dates
+    remain eligible and are still checked for ownership, completion, and final
+    domain elsewhere.  This keeps the migration compatible without proposing a
+    newer crawl as the historical baseline when reliable dates are available.
+    """
+    candidate_value = (candidate or {}).get('completed_at') or (candidate or {}).get('started_at')
+    # A baseline should be finished before the current crawl began whenever
+    # both lifecycle timestamps are available.
+    current_value = (current or {}).get('started_at') or (current or {}).get('completed_at')
+    if not candidate_value or not current_value:
+        return True
+
+    def parse(value):
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).strip().replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    try:
+        return parse(candidate_value) < parse(current_value)
+    except (TypeError, ValueError, OverflowError):
+        # Preserve compatibility with legacy timestamp strings while avoiding
+        # a hard failure in the preflight endpoint.
+        return str(candidate_value) < str(current_value)
+
+
+def _report_source_statuses(facts):
+    labels = {
+        'gsc': 'Google Search Console', 'ga4': 'Google Analytics 4',
+        'crux': 'Chrome UX Report', 'pagespeed': 'PageSpeed / Lighthouse',
+    }
+    rows = []
+    for key, label in labels.items():
+        source = (facts.get('enrichments') or {}).get(key) or {}
+        status = source.get('status') or 'not_connected'
+        available = status in {'available', 'connected', 'stored'}
+        rows.append({'key': key, 'label': label, 'status': 'available' if available else 'not_connected', 'available': available})
+    return rows
+
+
+def _report_cost_estimate(model, report_types, facts):
+    """Estimate token envelope; return no money when provider pricing is absent."""
+    from src.reporting_settings import get_openrouter_model
+
+    metadata = get_openrouter_model(model) if model else None
+    types = report_types or ['executive']
+    writer_budgets = {'executive': 6000, 'commercial': 9000, 'technical': 16000}
+    repair_budgets = {'executive': 7000, 'commercial': 10000, 'technical': 18000}
+    facts_tokens = max(1, len(json.dumps(facts or {}, ensure_ascii=False)) // 4)
+    normal_output = 6000 + sum(writer_budgets.get(item, 6000) + 4000 for item in types)
+    maximum_output = 6000 + sum(writer_budgets.get(item, 6000) + 4000 + repair_budgets.get(item, 7000) + 4000 for item in types)
+    normal_calls = 1 + (len(types) * 2)
+    maximum_calls = 1 + (len(types) * 4)
+    result = {
+        'model': model, 'normal_calls': normal_calls, 'maximum_calls': maximum_calls,
+        'normal_output_tokens': normal_output, 'maximum_output_tokens': maximum_output,
+        'pricing_available': False, 'currency': 'USD', 'normal_cost_usd': None, 'maximum_cost_usd': None,
+    }
+    pricing = (metadata or {}).get('pricing') or {}
+    try:
+        prompt_price = float(pricing.get('prompt'))
+        completion_price = float(pricing.get('completion'))
+    except (TypeError, ValueError):
+        return result
+    normal_input = facts_tokens * normal_calls
+    maximum_input = facts_tokens * maximum_calls
+    result.update({
+        'pricing_available': True,
+        'normal_cost_usd': round((normal_input * prompt_price) + (normal_output * completion_price), 4),
+        'maximum_cost_usd': round((maximum_input * prompt_price) + (maximum_output * completion_price), 4),
+    })
+    return result
+
+
+@app.route('/api/crawls/<int:crawl_id>/report-preflight')
+@login_required
+def report_preflight(crawl_id):
+    """Return a factual, token-free preview before a V2 report is queued."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        from src.crawl_db import get_crawl_by_id, get_user_crawls
+        from src.reporting_v2 import build_audit_facts
+
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+        if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
+        if crawl.get('status') != 'completed':
+            return jsonify({'success': False, 'error': 'El rastreo debe estar completado'}), 400
+        payload = request.args
+        requested_values = payload.getlist('report_types') if hasattr(payload, 'getlist') else None
+        if not requested_values:
+            requested_values = [payload.get('report_types', 'executive,commercial,technical')]
+        requested = []
+        for value in requested_values:
+            if isinstance(value, (list, tuple)):
+                requested.extend(str(item).strip() for item in value)
+            else:
+                requested.extend(str(value).strip() for value in str(value).split(',') if str(value).strip())
+        requested = [item for item in requested if item]
+        invalid_types = [item for item in requested if item not in REPORT_TYPES]
+        if invalid_types:
+            return jsonify({'success': False, 'error': 'Tipo de informe no válido'}), 400
+        report_types = requested or ['executive', 'commercial', 'technical']
+        baseline_raw = payload.get('baseline_crawl_id')
+        baseline_disabled = str(baseline_raw or '').strip().lower() in {'none', 'null', 'off', 'disabled'}
+        baseline_id = None if baseline_disabled else (_normalise_optional_crawl_id(baseline_raw) if baseline_raw else None)
+        if baseline_id:
+            if int(baseline_id) == int(crawl_id):
+                return jsonify({'success': False, 'error': 'El rastreo base debe ser anterior al rastreo actual'}), 400
+            baseline = get_crawl_by_id(baseline_id)
+            if not baseline or not user_can_access_crawl(baseline, session.get('user_id'), ensure_session_id()):
+                return jsonify({'success': False, 'error': 'No autorizado para usar el rastreo base'}), 403
+            if baseline.get('status') != 'completed':
+                return jsonify({'success': False, 'error': 'El rastreo base debe estar completado'}), 400
+            if _report_domain(baseline) != _report_domain(crawl):
+                return jsonify({'success': False, 'error': 'El rastreo base debe pertenecer al mismo dominio final'}), 400
+            if not _crawl_is_prior(baseline, crawl):
+                return jsonify({'success': False, 'error': 'El rastreo base debe ser anterior al rastreo actual'}), 400
+        candidates = []
+        for candidate in get_user_crawls(session.get('user_id'), limit=100, offset=0, status_filter='completed'):
+            if (
+                int(candidate.get('id')) == int(crawl_id)
+                or _report_domain(candidate) != _report_domain(crawl)
+                or not _crawl_is_prior(candidate, crawl)
+            ):
+                continue
+            candidates.append({
+                'id': candidate.get('id'), 'domain': _report_domain(candidate),
+                'completed_at': candidate.get('completed_at'),
+            })
+        candidates.sort(key=lambda item: (item.get('completed_at') or '', item.get('id') or 0), reverse=True)
+        recommended = candidates[0]['id'] if candidates and baseline_id is None and not baseline_disabled else baseline_id
+        effective_baseline_id = recommended
+        facts = build_audit_facts(crawl_id, crawl_metadata=crawl, baseline_crawl_id=effective_baseline_id)
+        profile = _get_report_profile(session.get('user_id'))
+        requested_model = payload.get('model')
+        if requested_model:
+            requested_model = normalize_report_model(requested_model)
+        estimate = _report_cost_estimate(
+            _first_nonblank(requested_model, profile.get('manual_model'), profile.get('default_model')),
+            report_types, facts,
+        )
+        denoms = (facts.get('coverage') or {}).get('denominators') or {}
+        return jsonify({
+            'success': True,
+            'crawl': {'id': crawl_id, 'domain': _report_domain(crawl), 'completed_at': crawl.get('completed_at')},
+            'coverage': {
+                'denominators': denoms, 'coverage_ratio': (facts.get('coverage') or {}).get('coverage_ratio'),
+                'limitations': len(facts.get('limitations') or []),
+                'limitation_items': list(facts.get('limitations') or []),
+            },
+            'sources': _report_source_statuses(facts),
+            'historical': facts.get('comparison') or {'available': False},
+            'baseline': {'selected_id': effective_baseline_id, 'candidates': candidates},
+            'estimate': estimate,
+            'feature': {'reports_v2_enabled': REPORTS_V2_ENABLED, 'quality_threshold': 90},
+        })
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        return jsonify({'success': False, 'error': 'No se pudo calcular la cobertura del informe'}), 500
 
 
 @app.route('/api/report-models')
@@ -1073,7 +2004,7 @@ def get_report_models():
 
         return jsonify({'success': True, 'models': list_openrouter_models()})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudieron cargar los modelos'}), 500
 
 
 @app.route('/api/report-models/refresh', methods=['POST'])
@@ -1084,28 +2015,28 @@ def refresh_report_models():
         return report_feature_forbidden()
     try:
         from src.openrouter_client import refresh_models
-        from src.reporting_settings import get_reporting_settings
 
         payload = request_json_object()
-        settings = get_reporting_settings()
+        settings = _get_report_profile(session.get('user_id'))
         api_key = _first_nonblank(payload.get('openrouter_api_key'), settings.get('openrouter_api_key'))
         if not api_key:
             return jsonify({'success': False, 'error': 'Se requiere la clave API de OpenRouter'}), 400
         return jsonify({'success': True, 'models': refresh_models(api_key)})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudieron actualizar los modelos'}), 500
 
 
 @app.route('/api/crawls/<int:crawl_id>/reports', methods=['POST'])
 @login_required
 def create_crawl_report(crawl_id):
-    """Queue an AI PDF report for a completed crawl."""
+    """Queue one legacy report or a V2 report pack for a completed crawl."""
     if not current_user_can_use_reports():
         return report_feature_forbidden()
     try:
         from src.crawl_db import get_crawl_by_id
-        from src.reporting_jobs import create_report_job
-        from src.reporting_settings import get_reporting_settings
+        from src.reporting_jobs import create_report_job, create_report_pack
+        from src.reporting_settings import get_report_asset
+        from src.report_assets import asset_data_uri
 
         user_id = session.get('user_id')
         session_id = ensure_session_id()
@@ -1118,29 +2049,84 @@ def create_crawl_report(crawl_id):
             return jsonify({'success': False, 'error': 'Los informes solo pueden generarse para rastreos completados'}), 400
 
         payload = request_json_object()
-        options = resolve_report_request_options(payload, get_reporting_settings())
+        profile = _get_report_profile(session.get('user_id'))
+        options = resolve_report_request_options(payload, profile)
         if not options.get('model'):
             return jsonify({'success': False, 'error': 'Se requiere un modelo de informe'}), 400
         if not options.get('openrouter_api_key'):
             return jsonify({'success': False, 'error': 'Se requiere la clave API de OpenRouter'}), 400
 
-        report_id = create_report_job(
-            crawl_id,
-            options['language'],
-            options['tone'],
-            options['model'],
-        )
-        worker = threading.Thread(
-            target=run_report_job,
-            args=(report_id, crawl_id, options),
-            daemon=True,
-        )
+        baseline_crawl_id = options.get('baseline_crawl_id')
+        if baseline_crawl_id:
+            if int(baseline_crawl_id) == int(crawl_id):
+                return jsonify({'success': False, 'error': 'El rastreo base debe ser anterior al rastreo actual'}), 400
+            baseline = get_crawl_by_id(baseline_crawl_id)
+            if not baseline or not user_can_access_crawl(baseline, user_id, session_id):
+                return jsonify({'success': False, 'error': 'No autorizado para usar el rastreo base'}), 403
+            if baseline.get('status') != 'completed':
+                return jsonify({'success': False, 'error': 'El rastreo base debe estar completado'}), 400
+            if _report_domain(baseline) != _report_domain(crawl):
+                return jsonify({'success': False, 'error': 'El rastreo base debe pertenecer al mismo dominio final'}), 400
+            if not _crawl_is_prior(baseline, crawl):
+                return jsonify({'success': False, 'error': 'El rastreo base debe ser anterior al rastreo actual'}), 400
+
+        if len(options['report_types']) > 1 and not options.get('use_v2'):
+            return jsonify({'success': False, 'error': 'El paquete de informes requiere activar Report Suite V2'}), 400
+
+        pack_id = None
+        if options.get('use_v2') and len(options['report_types']) > 1:
+            pack_id = create_report_pack(crawl_id, options['language'], options['model'], {
+                'report_types': options['report_types'],
+                'commercial_context': options['commercial_context'],
+                'baseline_crawl_id': baseline_crawl_id,
+                'enrichments': options.get('enrichments') or {},
+            })
+
+        queued_jobs = []
+        for report_type in options['report_types']:
+            job_options = dict(options)
+            job_options['tone'] = report_type
+            job_options['report_type'] = report_type
+            client_context = dict(options.get('client_context') or {})
+            client_context.setdefault('client_name', _report_domain(crawl) or crawl.get('base_url') or '')
+            job_options['client_context'] = client_context
+            logo_asset_id = (options.get('branding') or {}).get('logo_asset_id')
+            asset = get_report_asset(logo_asset_id, user_id) if logo_asset_id else None
+            if logo_asset_id and not asset:
+                return jsonify({'success': False, 'error': 'Logo no encontrado o no autorizado'}), 400
+            if asset:
+                logo_data_uri = asset_data_uri(asset)
+                if not logo_data_uri:
+                    return jsonify({'success': False, 'error': 'El logo guardado ya no está disponible'}), 400
+                job_options['branding'] = dict(options.get('branding') or {})
+                job_options['branding']['logo_path'] = logo_data_uri
+            persisted_branding = {
+                key: value for key, value in (job_options.get('branding') or {}).items()
+                if key in {'agency_name', 'primary_color', 'secondary_color', 'accent_color',
+                           'font_family', 'logo_asset_id', 'client_name'}
+            }
+            report_id = create_report_job(
+                crawl_id, options['language'], report_type, options['model'],
+                commercial_context=options['commercial_context'], branding=persisted_branding,
+                client_context=client_context, enrichments=options.get('enrichments'), pack_id=pack_id,
+                template_version='2.0' if options.get('use_v2') else '1.0',
+            )
+            queued_jobs.append((report_id, job_options))
+
+        worker_target = run_report_pack if options.get('use_v2') and len(queued_jobs) > 1 else run_report_job
+        worker_args = (crawl_id, queued_jobs) if worker_target is run_report_pack else (queued_jobs[0][0], crawl_id, queued_jobs[0][1])
+        worker = threading.Thread(target=worker_target, args=worker_args, daemon=True)
         worker.start()
-        return jsonify({'success': True, 'report_id': report_id})
+        return jsonify({
+            'success': True,
+            'report_id': queued_jobs[0][0],
+            'report_ids': [report_id for report_id, _ in queued_jobs],
+            'pack_id': pack_id,
+        })
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudo encolar el informe'}), 500
 
 
 @app.route('/api/crawls/<int:crawl_id>/reports')
@@ -1163,7 +2149,7 @@ def list_crawl_reports(crawl_id):
             'reports': [public_report_job(job) for job in list_report_jobs_for_crawl(crawl_id)],
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudieron cargar los informes'}), 500
 
 
 @app.route('/api/reports/<int:report_id>/status')
@@ -1186,7 +2172,7 @@ def get_report_status(report_id):
             return jsonify({'success': False, 'error': 'No autorizado'}), 403
         return jsonify({'success': True, 'report': public_report_job(job)})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudo consultar el estado del informe'}), 500
 
 
 @app.route('/api/reports/<int:report_id>/download')
@@ -1214,10 +2200,39 @@ def download_report(report_id):
             pdf_path,
             mimetype='application/pdf',
             as_attachment=True,
-            download_name=f'mitmore-seo-crawl-report-{report_id}.pdf',
+            download_name=f'seo-report-{report_id}.pdf',
         )
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'No se pudo descargar el informe'}), 500
+
+
+@app.route('/api/reports/<int:report_id>/artifact/<artifact>')
+@login_required
+def report_artifact(report_id, artifact):
+    """Serve a completed V2 HTML or JSON artifact after crawl access checks."""
+    if not current_user_can_use_reports():
+        return report_feature_forbidden()
+    try:
+        job, crawl, allowed = report_access_context(report_id, session.get('user_id'), ensure_session_id())
+        if not job:
+            return jsonify({'success': False, 'error': 'Informe no encontrado'}), 404
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+        if not allowed:
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
+        path = safe_report_artifact_path(job, artifact)
+        can_download = job.get('status') == 'completed' or (
+            job.get('status') == 'failed' and artifact in {'facts', 'analysis', 'document', 'quality', 'manifest'}
+        )
+        if not can_download or not path or not os.path.exists(path):
+            return jsonify({'success': False, 'error': 'El artefacto del informe aún no está listo'}), 404
+        mimetype = {
+            'html': 'text/html', 'facts': 'application/json', 'analysis': 'application/json',
+            'document': 'application/json', 'quality': 'application/json', 'manifest': 'application/json',
+        }[artifact]
+        return send_file(path, mimetype=mimetype, as_attachment=artifact != 'html')
+    except Exception as e:
+        return jsonify({'success': False, 'error': 'No se pudo cargar el artefacto del informe'}), 500
 
 @app.route('/api/start_crawl', methods=['POST'])
 @login_required
@@ -1617,8 +2632,63 @@ def crawl_status_by_id(crawl_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/crawls/<int:crawl_id>/dashboard')
+@login_required
+def crawl_dashboard_by_id(crawl_id):
+    """Return a compact technical SEO overview for the selected crawl."""
+    try:
+        from src.crawl_db import get_crawl_by_id
+        from src.dashboard_data import build_dashboard_snapshot
+
+        session_id = ensure_session_id()
+        user_id = session.get('user_id')
+        crawl = get_crawl_by_id(crawl_id)
+        if not crawl:
+            return jsonify({'success': False, 'error': 'Rastreo no encontrado'}), 404
+        if not user_can_access_crawl(crawl, user_id, session_id):
+            return jsonify({'success': False, 'error': 'No autorizado'}), 403
+
+        exclusion_patterns_text = get_session_settings().get_settings().get('issueExclusionPatterns', '')
+        exclusion_patterns = tuple(pattern.strip() for pattern in exclusion_patterns_text.split('\n') if pattern.strip())
+        active = crawl_jobs.get(crawl_id)
+        is_live = active is not None and active.is_running
+        ttl = 5 if is_live else 60
+        key = (crawl_id, exclusion_patterns)
+        now = time.monotonic()
+        with dashboard_cache_lock:
+            cached = dashboard_cache.get(key)
+            if cached and now - cached['created_at'] < ttl:
+                payload = dict(cached['payload'])
+            else:
+                payload = None
+
+        if payload is None:
+            payload = build_dashboard_snapshot(crawl_id, exclusion_patterns)
+            with dashboard_cache_lock:
+                dashboard_cache[key] = {'created_at': now, 'payload': dict(payload)}
+
+        crawl_payload = dict(payload.get('crawl') or {})
+        discovered = int(crawl_payload.get('discovered') or 0)
+        crawled = int(crawl_payload.get('crawled') or 0)
+        if active:
+            discovered = max(discovered, int(active.stats.get('discovered') or 0))
+            crawled = int(active.stats.get('crawled') or crawled)
+            crawl_payload['status'] = 'paused' if active.is_paused else 'running'
+        crawl_payload['discovered'] = discovered
+        crawl_payload['crawled'] = crawled
+        crawl_payload['progress'] = round(min(100, (crawled / max(discovered, 1)) * 100), 1)
+        crawl_payload['partial'] = crawl_payload.get('status') in {'running', 'paused'}
+        payload['crawl'] = crawl_payload
+        payload['success'] = True
+        payload['generated_at'] = datetime.utcnow().isoformat(timespec='seconds') + 'Z'
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def _next_cursor(rows, current):
-    return rows[-1].get('_row_order', current) if rows else current
+    value = rows[-1].get('_row_order', current) if rows else current
+    return str(value) if value is not None else None
 
 def _offset_cursor(rows, offset):
     return offset + len(rows) if rows else offset
@@ -1637,6 +2707,50 @@ def _page_offset(value):
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _request_filters(include_issues=False):
+    filters = {
+        key: request.args.get(key)
+        for key in ('kind', 'scope', 'status_family', 'content_type', 'depth', 'issue_type', 'category')
+        if request.args.get(key) not in (None, '')
+    }
+    if include_issues:
+        filters['issues'] = [value for value in request.args.getlist('issue') if value]
+    return filters or None
+
+
+def _row_matches_filters(row, filters, kind):
+    filters = filters or {}
+    legacy_kind = filters.get('kind')
+    scope = filters.get('scope') or (legacy_kind if legacy_kind in {'internal', 'external'} else None)
+    is_internal = row.get('is_internal') in (True, 1, '1', 'true', 'True')
+    if scope == 'internal' and not is_internal:
+        return False
+    if scope == 'external' and is_internal:
+        return False
+    status = int(row.get('status_code' if kind == 'urls' else 'target_status') or 0)
+    family = filters.get('status_family') or (legacy_kind if legacy_kind in ('2xx', '3xx', '4xx', '5xx', 'no_response') else None)
+    if family in ('2xx', '3xx', '4xx', '5xx') and not (int(family[0]) * 100 <= status < int(family[0]) * 100 + 100):
+        return False
+    if kind == 'urls':
+        if family == 'no_response' and status != 0:
+            return False
+        if filters.get('depth') not in (None, '') and int(row.get('depth') or 0) != int(filters['depth']):
+            return False
+        content_type = str(row.get('content_type') or '').lower()
+        wanted = filters.get('content_type') or (legacy_kind if legacy_kind in ('html', 'css', 'js', 'images') else None)
+        if wanted == 'js': wanted = 'javascript'
+        if wanted and wanted not in content_type:
+            return False
+    if kind == 'issues':
+        if filters.get('issue_type') and row.get('type') != filters['issue_type']:
+            return False
+        if filters.get('category') and row.get('category') != filters['category']:
+            return False
+        if filters.get('issues') and row.get('issue') not in filters['issues']:
+            return False
+    return True
 
 @app.route('/api/crawls/<int:crawl_id>/urls')
 @login_required
@@ -1657,12 +2771,11 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
         after = request.args.get('after', type=int)
         after = _page_offset(after) if after is not None else None
-        kind = request.args.get('kind')
+        filters = _request_filters()
         page_offset = after if after is not None else offset
         cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_urls
-            filters = {'kind': kind} if kind else None
             clickhouse_page = load_urls(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
                 rows = clickhouse_page['rows']
@@ -1680,8 +2793,14 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
         except Exception as e:
             print(f"ClickHouse URL page unavailable for crawl {crawl_id}: {e}")
 
-        counts = get_crawl_counts(crawl_id)
-        rows = load_crawled_urls(crawl_id, limit=limit, offset=page_offset)
+        if filters:
+            all_rows = [row for row in load_crawled_urls(crawl_id) if _row_matches_filters(row, filters, 'urls')]
+            rows = all_rows[page_offset:page_offset + limit]
+            total = len(all_rows)
+        else:
+            counts = get_crawl_counts(crawl_id)
+            rows = load_crawled_urls(crawl_id, limit=limit, offset=page_offset)
+            total = counts['urls']
         return jsonify({
             'success': True,
             'crawl_id': crawl_id,
@@ -1690,7 +2809,7 @@ def load_crawl_urls_page(crawl_id, limit=None, offset=None):
             'offset': page_offset,
             'next_cursor': _offset_cursor(rows, page_offset),
             'has_more': _has_more(rows, limit),
-            'total': counts['urls'],
+            'total': total,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1714,12 +2833,11 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
         after = request.args.get('after', type=int)
         after = _page_offset(after) if after is not None else None
-        kind = request.args.get('kind')
+        filters = _request_filters()
         page_offset = after if after is not None else offset
         cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_links
-            filters = {'kind': kind} if kind else None
             clickhouse_page = load_links(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
                 rows = clickhouse_page['rows']
@@ -1737,8 +2855,14 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
         except Exception as e:
             print(f"ClickHouse link page unavailable for crawl {crawl_id}: {e}")
 
-        counts = get_crawl_counts(crawl_id)
-        rows = load_crawl_links(crawl_id, limit=limit, offset=page_offset)
+        if filters:
+            all_rows = [row for row in load_crawl_links(crawl_id) if _row_matches_filters(row, filters, 'links')]
+            rows = all_rows[page_offset:page_offset + limit]
+            total = len(all_rows)
+        else:
+            counts = get_crawl_counts(crawl_id)
+            rows = load_crawl_links(crawl_id, limit=limit, offset=page_offset)
+            total = counts['links']
         return jsonify({
             'success': True,
             'crawl_id': crawl_id,
@@ -1747,7 +2871,7 @@ def load_crawl_links_page(crawl_id, limit=None, offset=None):
             'offset': page_offset,
             'next_cursor': _offset_cursor(rows, page_offset),
             'has_more': _has_more(rows, limit),
-            'total': counts['links'],
+            'total': total,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1771,12 +2895,11 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
         offset = _page_offset(offset if offset is not None else request.args.get('offset', 0, type=int))
         after = request.args.get('after', type=int)
         after = _page_offset(after) if after is not None else None
-        issue_type = request.args.get('issue_type')
+        filters = _request_filters(include_issues=True)
         page_offset = after if after is not None else offset
         cursor_fallback = page_offset
         try:
             from src.crawl_clickhouse import load_issues
-            filters = {'issue_type': issue_type} if issue_type else None
             clickhouse_page = load_issues(crawl_id, limit=limit, offset=offset, after=after, filters=filters)
             if clickhouse_page:
                 rows = clickhouse_page['rows']
@@ -1799,8 +2922,14 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
         except Exception as e:
             print(f"ClickHouse issue page unavailable for crawl {crawl_id}: {e}")
 
-        counts = get_crawl_counts(crawl_id)
-        rows = load_crawl_issues(crawl_id, limit=limit, offset=page_offset)
+        if filters:
+            all_rows = [row for row in load_crawl_issues(crawl_id) if _row_matches_filters(row, filters, 'issues')]
+            rows = all_rows[page_offset:page_offset + limit]
+            total = len(all_rows)
+        else:
+            counts = get_crawl_counts(crawl_id)
+            rows = load_crawl_issues(crawl_id, limit=limit, offset=page_offset)
+            total = counts['issues']
         issues = rows
         if issues:
             current_settings = get_session_settings().get_settings()
@@ -1815,7 +2944,7 @@ def load_crawl_issues_page(crawl_id, limit=None, offset=None):
             'offset': page_offset,
             'next_cursor': _offset_cursor(rows, page_offset),
             'has_more': _has_more(rows, limit),
-            'total': counts['issues'],
+            'total': total,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

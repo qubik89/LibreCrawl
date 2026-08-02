@@ -20,15 +20,18 @@ class ReportingJobsTest(unittest.TestCase):
             language='es-ES',
             tone='executive',
             model='openai/gpt-4.1',
+            branding={'logo_asset_id': 'a' * 32, 'primary_color': '#123456'},
         )
 
         job = reporting_jobs.get_report_job(report_id)
         self.assertEqual(job['id'], report_id)
         self.assertEqual(job['crawl_id'], 42)
         self.assertEqual(job['status'], 'queued')
+        self.assertEqual(job['stage'], 'queued')
         self.assertEqual(job['language'], 'es-ES')
         self.assertEqual(job['tone'], 'executive')
         self.assertEqual(job['model'], 'openai/gpt-4.1')
+        self.assertEqual(job['branding']['logo_asset_id'], 'a' * 32)
         self.assertIsNone(job['markdown_path'])
         self.assertEqual(job['usage'], None)
 
@@ -71,6 +74,7 @@ class ReportingJobsTest(unittest.TestCase):
 
         job = reporting_jobs.get_report_job(report_id)
         self.assertEqual(job['status'], 'failed')
+        self.assertEqual(job['stage'], 'failed')
         self.assertIsNotNone(job['completed_at'])
 
     def test_usage_json_is_parsed_defensively(self):
@@ -98,7 +102,9 @@ class ReportingJobsTest(unittest.TestCase):
 
         self.assertEqual(count, 2)
         self.assertEqual(reporting_jobs.get_report_job(queued_id)['status'], 'failed')
+        self.assertEqual(reporting_jobs.get_report_job(queued_id)['stage'], 'failed')
         self.assertEqual(reporting_jobs.get_report_job(running_id)['error'], 'interrupted')
+        self.assertEqual(reporting_jobs.get_report_job(running_id)['stage'], 'failed')
         self.assertEqual(reporting_jobs.get_report_job(completed_id)['status'], 'completed')
 
 

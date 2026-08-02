@@ -151,12 +151,15 @@ class ReportingPdfTest(unittest.TestCase):
         self.assertEqual(result, output_path.resolve())
         chromium.launch.assert_called_once_with(headless=True, args=['--no-sandbox'])
         page.set_content.assert_called_once_with('<h1>Report</h1>', wait_until='networkidle')
-        page.pdf.assert_called_once_with(
-            path=str(output_path.resolve()),
-            format='A4',
-            print_background=True,
-            margin={'top': '18mm', 'right': '20mm', 'bottom': '22mm', 'left': '20mm'},
-        )
+        page.pdf.assert_called_once()
+        pdf_options = page.pdf.call_args.kwargs
+        self.assertEqual(pdf_options['path'], str(output_path.resolve()))
+        self.assertEqual(pdf_options['format'], 'A4')
+        self.assertTrue(pdf_options['print_background'])
+        self.assertTrue(pdf_options['prefer_css_page_size'])
+        self.assertTrue(pdf_options['display_header_footer'])
+        self.assertTrue(pdf_options['tagged'])
+        self.assertTrue(pdf_options['outline'])
         browser.close.assert_called_once_with()
 
     def test_render_report_pdf_rejects_paths_outside_reports_base_and_closes_on_error(self):

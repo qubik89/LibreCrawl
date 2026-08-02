@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import threading
@@ -127,19 +128,63 @@ class CrawlClickHouseTest(unittest.TestCase):
         self.assertIn('is_internal = 1', select_sql)
         self.assertIn('ORDER BY row_order ASC', select_sql)
         self.assertNotIn('OFFSET', select_sql)
-        self.assertEqual(page['rows'][0]['_row_order'], 101)
+        self.assertEqual(page['rows'][0]['_row_order'], '101')
 
-    def test_load_issues_allows_issue_type_filter(self):
-        client = FakeClickHouseClient(rows=[(101, '{"type":"warning"}')])
+    def test_load_rows_preserves_uint64_cursor_precision_for_json_clients(self):
+        first_order = 1785696868549154891
+        client = FakeClickHouseClient(rows=[
+            (first_order, '{"url":"https://example.com/a"}'),
+            (first_order + 1, '{"url":"https://example.com/b"}'),
+        ], total=2)
 
         with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
-            crawl_clickhouse.load_issues(
-                crawl_id=7,
-                limit=10,
-                filters={'issue_type': 'warning'},
+            page = crawl_clickhouse.load_issues(
+                crawl_id=9,
+                limit=2,
+                after=str(first_order - 1),
             )
 
-        self.assertIn("type = 'warning'", client.sql[-1])
+        encoded = json.dumps(page['rows'])
+        decoded = json.loads(encoded)
+        cursors = [row['_row_order'] for row in decoded]
+        self.assertEqual(cursors, [str(first_order), str(first_order + 1)])
+        self.assertEqual(len(set(cursors)), 2)
+        self.assertIn(f'row_order > {first_order - 1}', client.sql[-1])
+
+    def test_load_issues_allows_issue_type_filter(self):
+        for issue_type in ('error', 'warning', 'info'):
+            with self.subTest(issue_type=issue_type):
+                client = FakeClickHouseClient(rows=[(101, json.dumps({'type': issue_type}))])
+
+                with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+                    page = crawl_clickhouse.load_issues(
+                        crawl_id=7,
+                        limit=10,
+                        filters={'issue_type': issue_type},
+                    )
+
+                self.assertIn(f"type = '{issue_type}'", client.sql[-1])
+                self.assertEqual(page['rows'][0]['_row_order'], '101')
+
+    def test_dashboard_filters_keep_legacy_kind_and_support_exact_combinations(self):
+        client = FakeClickHouseClient()
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            crawl_clickhouse.load_urls(7, limit=10, filters={
+                'kind': 'internal', 'status_family': '4xx',
+                'content_type': 'html', 'depth': '2',
+            })
+        self.assertIn('is_internal = 1', client.sql[-1])
+        self.assertIn('status_code >= 400 AND status_code < 500', client.sql[-1])
+        self.assertIn("positionCaseInsensitive(content_type, 'html') > 0", client.sql[-1])
+        self.assertIn('depth = 2', client.sql[-1])
+
+        client = FakeClickHouseClient()
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            crawl_clickhouse.load_issues(7, limit=10, filters={
+                'category': 'SEO', 'issues': ['Missing Title Tag', "Bob's issue"],
+            })
+        self.assertIn("category = 'SEO'", client.sql[-1])
+        self.assertIn("issue IN ('Missing Title Tag', 'Bob\\'s issue')", client.sql[-1])
 
     def test_load_recent_urls_uses_descending_row_order(self):
         client = FakeClickHouseClient()

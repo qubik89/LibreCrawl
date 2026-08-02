@@ -1,0 +1,1148 @@
+{
+ "schema_version": "2.0",
+ "crawl": {
+  "id": "ialovers",
+  "base_url": "https://ialovers.com",
+  "base_domain": "ialovers.com",
+  "started_at": null,
+  "completed_at": "2026-08-02T19:33:43.499Z",
+  "source_export_version": "1.1",
+  "requests": 16,
+  "max_depth": 2
+ },
+ "coverage": {
+  "source": "export_v1.1",
+  "deduplication": "latest_url_or_unique_issue",
+  "denominators": {
+   "unique_urls": 15,
+   "internal_urls": 15,
+   "html_2xx_urls": 15,
+   "indexable_html_urls": 3,
+   "unique_links": 35,
+   "unique_issues": 42,
+   "sitemap_urls": null,
+   "discovered_urls": 16
+  },
+  "coverage_ratio": 93.8
+ },
+ "thematic_metrics": {
+  "http": {
+   "2xx": 15
+  },
+  "content": {
+   "missing_title": 0,
+   "missing_meta_description": 0,
+   "missing_h1": 0,
+   "thin_content_under_300_words": 9,
+   "denominator": 15
+  },
+  "performance": {
+   "source": "crawl_request_duration",
+   "count": 15,
+   "p50_ms": 1167.9,
+   "p75_ms": 1220.4,
+   "p90_ms": 1266.9,
+   "p95_ms": 1272.7
+  },
+  "links": {
+   "unique_edges": 35,
+   "internal_edges": 29
+  },
+  "indexability": {
+   "indexable_html_urls": 3,
+   "noindex_html_urls": 12,
+   "denominator": 15
+  }
+ },
+ "distributions": {
+  "status_codes": [
+   {
+    "label": "200",
+    "count": 15
+   }
+  ],
+  "issue_groups": [
+   {
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "count": 9
+   },
+   {
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "count": 8
+   },
+   {
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "count": 7
+   },
+   {
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "count": 7
+   },
+   {
+    "category": "Content",
+    "issue": "Thin Content",
+    "type": "warning",
+    "count": 4
+   },
+   {
+    "category": "Technical",
+    "issue": "Canonical URL Different",
+    "type": "warning",
+    "count": 3
+   },
+   {
+    "category": "Indexability",
+    "issue": "Nofollow Tag Present",
+    "type": "error",
+    "count": 2
+   },
+   {
+    "category": "Structured Data",
+    "issue": "No Structured Data",
+    "type": "error",
+    "count": 2
+   }
+  ],
+  "depth": [
+   {
+    "label": "0",
+    "count": 2
+   },
+   {
+    "label": "1",
+    "count": 9
+   },
+   {
+    "label": "2",
+    "count": 4
+   }
+  ]
+ },
+ "evidence": {
+  "urls": [
+   {
+    "id": "urls-1",
+    "url": "https://ialovers.com/",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1025.76,
+    "title": "Academia de inteligencia artificial en español | IA Lovers",
+    "meta_description": "Aprende IA con cursos prácticos, sesiones en vivo, comunidad y plantillas. Plaza fundadora de IA Lovers por 50 EUR al mes.",
+    "h1": "Aprende IA sin convertirteen coleccionista de cursos.",
+    "word_count": 1216,
+    "robots": "",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 17,
+    "external_links": 4,
+    "lang": "es",
+    "size": 668354,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 4,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-2",
+    "url": "https://ialovers.com/contacto",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 0,
+    "response_time": 611.74,
+    "title": "Contacto | IA Lovers",
+    "meta_description": "Contacta con IA Lovers para soporte, facturación, ventas, privacidad o sugerencias sobre la academia de inteligencia artificial.",
+    "h1": "Contacto",
+    "word_count": 123,
+    "robots": "",
+    "canonical_url": "https://ialovers.com/contacto",
+    "is_internal": true,
+    "internal_links": 12,
+    "external_links": 0,
+    "lang": "es",
+    "size": 524519,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 4
+   },
+   {
+    "id": "urls-3",
+    "url": "https://ialovers.com/about",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 0,
+    "response_time": 616.84,
+    "title": "Sobre IA Lovers | IA Lovers",
+    "meta_description": "IA Lovers es una academia de inteligencia artificial en español con cursos prácticos, sesiones en vivo y comunidad para aprender haciendo.",
+    "h1": "Sobre IA Lovers",
+    "word_count": 152,
+    "robots": "",
+    "canonical_url": "https://ialovers.com/about",
+    "is_internal": true,
+    "internal_links": 12,
+    "external_links": 0,
+    "lang": "es",
+    "size": 516427,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-4",
+    "url": "https://ialovers.com/sign-in",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1167.87,
+    "title": "Entrar | IA Lovers",
+    "meta_description": "Entra en tu cuenta de IA Lovers",
+    "h1": "Entrar",
+    "word_count": 37,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 6,
+    "external_links": 0,
+    "lang": "es",
+    "size": 507678,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-5",
+    "url": "https://ialovers.com/aviso-legal",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1170.69,
+    "title": "Legal Notice | IA Lovers",
+    "meta_description": "Legal information about the owner of IA Lovers and general website terms.",
+    "h1": "Legal Notice",
+    "word_count": 781,
+    "robots": "noindex, follow",
+    "canonical_url": "https://ialovers.com/aviso-legal",
+    "is_internal": true,
+    "internal_links": 14,
+    "external_links": 0,
+    "lang": "es",
+    "size": 529284,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-6",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1181.13,
+    "title": "Crear cuenta | IA Lovers",
+    "meta_description": "Crea tu cuenta de IA Lovers",
+    "h1": "Crear cuenta",
+    "word_count": 170,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 5,
+    "external_links": 0,
+    "lang": "es",
+    "size": 519889,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-7",
+    "url": "https://ialovers.com/privacidad",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1213.22,
+    "title": "Privacy Policy | IA Lovers",
+    "meta_description": "Information about how IA Lovers processes personal data from users, subscribers, and visitors.",
+    "h1": "Privacy Policy",
+    "word_count": 809,
+    "robots": "noindex, follow",
+    "canonical_url": "https://ialovers.com/privacidad",
+    "is_internal": true,
+    "internal_links": 12,
+    "external_links": 2,
+    "lang": "es",
+    "size": 531542,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-8",
+    "url": "https://ialovers.com/terminos",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1221.2,
+    "title": "Terms of Service | IA Lovers",
+    "meta_description": "Terms governing access to and use of IA Lovers, the digital AI training membership.",
+    "h1": "Terms of Service",
+    "word_count": 1063,
+    "robots": "noindex, follow",
+    "canonical_url": "https://ialovers.com/terminos",
+    "is_internal": true,
+    "internal_links": 13,
+    "external_links": 0,
+    "lang": "es",
+    "size": 535722,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-9",
+    "url": "https://ialovers.com/cookies",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1220.41,
+    "title": "Cookie Policy | IA Lovers",
+    "meta_description": "Information about the use of cookies, pixels, and similar technologies at IA Lovers.",
+    "h1": "Cookie Policy",
+    "word_count": 466,
+    "robots": "noindex, follow",
+    "canonical_url": "https://ialovers.com/cookies",
+    "is_internal": true,
+    "internal_links": 12,
+    "external_links": 0,
+    "lang": "es",
+    "size": 523499,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-10",
+    "url": "https://ialovers.com/reembolsos",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1266.9,
+    "title": "Refund Policy | IA Lovers",
+    "meta_description": "Cancellations, withdrawals, and refunds for IA Lovers purchases and subscriptions handled by Stripe.",
+    "h1": "Refund Policy",
+    "word_count": 788,
+    "robots": "noindex, follow",
+    "canonical_url": "https://ialovers.com/reembolsos",
+    "is_internal": true,
+    "internal_links": 12,
+    "external_links": 0,
+    "lang": "es",
+    "size": 527880,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 2,
+    "json_ld_count": 3
+   },
+   {
+    "id": "urls-11",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 1,
+    "response_time": 1272.69,
+    "title": "Crear cuenta | IA Lovers",
+    "meta_description": "Crea tu cuenta de IA Lovers",
+    "h1": "Crear cuenta",
+    "word_count": 170,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 5,
+    "external_links": 0,
+    "lang": "es",
+    "size": 519884,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-12",
+    "url": "https://ialovers.com/reset-password",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 2,
+    "response_time": 243.89,
+    "title": "Reset Password | IA Lovers",
+    "meta_description": "Reset your IA Lovers password",
+    "h1": "Reset Password",
+    "word_count": 36,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 5,
+    "external_links": 0,
+    "lang": "es",
+    "size": 504848,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-13",
+    "url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 2,
+    "response_time": 232.37,
+    "title": "Entrar | IA Lovers",
+    "meta_description": "Entra en tu cuenta de IA Lovers",
+    "h1": "Entrar",
+    "word_count": 37,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 6,
+    "external_links": 0,
+    "lang": "es",
+    "size": 507963,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-14",
+    "url": "https://ialovers.com/sign-up",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 2,
+    "response_time": 256.88,
+    "title": "Crear cuenta | IA Lovers",
+    "meta_description": "Crea tu cuenta de IA Lovers",
+    "h1": "Crear cuenta",
+    "word_count": 153,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 5,
+    "external_links": 0,
+    "lang": "es",
+    "size": 516947,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   },
+   {
+    "id": "urls-15",
+    "url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "status_code": 200,
+    "content_type": "text/html",
+    "depth": 2,
+    "response_time": 176.68,
+    "title": "Entrar | IA Lovers",
+    "meta_description": "Entra en tu cuenta de IA Lovers",
+    "h1": "Entrar",
+    "word_count": 37,
+    "robots": "noindex, nofollow",
+    "canonical_url": "https://ialovers.com",
+    "is_internal": true,
+    "internal_links": 6,
+    "external_links": 0,
+    "lang": "es",
+    "size": 507960,
+    "error_type": null,
+    "viewport": "width=device-width, initial-scale=1, viewport-fit=cover",
+    "image_count": 1,
+    "json_ld_count": 0
+   }
+  ],
+  "links": [
+   {
+    "id": "links-1",
+    "source_url": "https://ialovers.com/privacidad",
+    "target_url": "https://stripe.com/privacy",
+    "anchor_text": "https://stripe.com/privacy",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "stripe.com",
+    "target_status": null
+   },
+   {
+    "id": "links-2",
+    "source_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "target_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "anchor_text": "¿Ya tienes cuenta? Entrar",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-3",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/sign-up",
+    "anchor_text": "¿No tienes cuenta? Crear cuenta",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-4",
+    "source_url": "https://ialovers.com/aviso-legal",
+    "target_url": "https://ialovers.com",
+    "anchor_text": "https://ialovers.com",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-5",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/reset-password",
+    "anchor_text": "¿La has olvidado?",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-6",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/terminos",
+    "anchor_text": "términos",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-7",
+    "source_url": "https://ialovers.com/sign-in",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-8",
+    "source_url": "https://ialovers.com/privacidad",
+    "target_url": "https://www.aepd.es",
+    "anchor_text": "https://www.aepd.es",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "www.aepd.es",
+    "target_status": null
+   },
+   {
+    "id": "links-9",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/terminos",
+    "anchor_text": "términos",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-10",
+    "source_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "target_url": "https://ialovers.com/terminos",
+    "anchor_text": "términos",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-11",
+    "source_url": "https://ialovers.com/sign-up",
+    "target_url": "https://ialovers.com/terminos",
+    "anchor_text": "términos",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-12",
+    "source_url": "https://ialovers.com/aviso-legal",
+    "target_url": "https://ialovers.com/reembolsos",
+    "anchor_text": "Refund Policy",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-13",
+    "source_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-14",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/sign-up",
+    "anchor_text": "¿No tienes cuenta? Crear cuenta",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-15",
+    "source_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "target_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "anchor_text": "¿Ya tienes cuenta? Entrar",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-16",
+    "source_url": "https://ialovers.com/reset-password",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-17",
+    "source_url": "https://ialovers.com/reset-password",
+    "target_url": "https://ialovers.com/sign-in",
+    "anchor_text": "Back to Sign In",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-18",
+    "source_url": "https://ialovers.com/terminos",
+    "target_url": "https://ialovers.com/reembolsos",
+    "anchor_text": "Refund Policy",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-19",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "anchor_text": "Anual · 500€/año",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-20",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-21",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://octav.es",
+    "anchor_text": "Web personal",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "octav.es",
+    "target_status": null
+   },
+   {
+    "id": "links-22",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "anchor_text": "Suscribirme por 50€/mes",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-23",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://www.linkedin.com/in/romeochiritoiu",
+    "anchor_text": "LinkedIn",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "www.linkedin.com",
+    "target_status": null
+   },
+   {
+    "id": "links-24",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://www.soywebmaster.com/",
+    "anchor_text": "Soywebmaster",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "www.soywebmaster.com",
+    "target_status": null
+   },
+   {
+    "id": "links-25",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dmonthly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-26",
+    "source_url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "target_url": "https://ialovers.com/privacidad",
+    "anchor_text": "política de privacidad",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-27",
+    "source_url": "https://ialovers.com/sign-in",
+    "target_url": "https://ialovers.com/sign-up",
+    "anchor_text": "¿No tienes cuenta? Crear cuenta",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   },
+   {
+    "id": "links-28",
+    "source_url": "https://ialovers.com/",
+    "target_url": "https://www.davidayala.com/sobre-mi/",
+    "anchor_text": "Sobre David",
+    "placement": "body",
+    "is_internal": false,
+    "target_domain": "www.davidayala.com",
+    "target_status": null
+   },
+   {
+    "id": "links-29",
+    "source_url": "https://ialovers.com/sign-in?callbackUrl=%2Fapp%2Fsubscribe%3Fcodename%3Dia-lovers%26type%3Dyearly%26provider%3Dstripe",
+    "target_url": "https://ialovers.com/reset-password",
+    "anchor_text": "¿La has olvidado?",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": 200
+   },
+   {
+    "id": "links-30",
+    "source_url": "https://ialovers.com/sign-in",
+    "target_url": "https://ialovers.com/terminos",
+    "anchor_text": "términos",
+    "placement": "body",
+    "is_internal": true,
+    "target_domain": "ialovers.com",
+    "target_status": null
+   }
+  ],
+  "issues": [
+   {
+    "id": "issues-1",
+    "url": "https://ialovers.com/contacto",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 20 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-2",
+    "url": "https://ialovers.com/contacto",
+    "category": "Content",
+    "issue": "Thin Content",
+    "type": "warning",
+    "details": "Page has only 123 words (recommended: ≥300)"
+   },
+   {
+    "id": "issues-3",
+    "url": "https://ialovers.com/about",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 27 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-4",
+    "url": "https://ialovers.com/about",
+    "category": "Content",
+    "issue": "Thin Content",
+    "type": "warning",
+    "details": "Page has only 152 words (recommended: ≥300)"
+   },
+   {
+    "id": "issues-5",
+    "url": "https://ialovers.com/",
+    "category": "Technical",
+    "issue": "Canonical URL Different",
+    "type": "warning",
+    "details": "Canonical points to: https://ialovers.com"
+   },
+   {
+    "id": "issues-6",
+    "url": "https://ialovers.com/",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1025.76ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-7",
+    "url": "https://ialovers.com/aviso-legal",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 24 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-8",
+    "url": "https://ialovers.com/aviso-legal",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 73 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-9",
+    "url": "https://ialovers.com/aviso-legal",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1170.69ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-10",
+    "url": "https://ialovers.com/aviso-legal",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-11",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 24 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-12",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 27 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-13",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Content",
+    "issue": "Thin Content",
+    "type": "warning",
+    "details": "Page has only 170 words (recommended: ≥300)"
+   },
+   {
+    "id": "issues-14",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Technical",
+    "issue": "Canonical URL Different",
+    "type": "warning",
+    "details": "Canonical points to: https://ialovers.com"
+   },
+   {
+    "id": "issues-15",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Structured Data",
+    "issue": "No Structured Data",
+    "type": "error",
+    "details": "Page has no JSON-LD or Schema.org markup"
+   },
+   {
+    "id": "issues-16",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1181.13ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-17",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-18",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=monthly&provider=stripe",
+    "category": "Indexability",
+    "issue": "Nofollow Tag Present",
+    "type": "error",
+    "details": "Links on this page are NOT followed by search engines - has nofollow directive"
+   },
+   {
+    "id": "issues-19",
+    "url": "https://ialovers.com/privacidad",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 26 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-20",
+    "url": "https://ialovers.com/privacidad",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 94 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-21",
+    "url": "https://ialovers.com/privacidad",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1213.22ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-22",
+    "url": "https://ialovers.com/privacidad",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-23",
+    "url": "https://ialovers.com/terminos",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 28 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-24",
+    "url": "https://ialovers.com/terminos",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 83 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-25",
+    "url": "https://ialovers.com/terminos",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1221.2ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-26",
+    "url": "https://ialovers.com/terminos",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-27",
+    "url": "https://ialovers.com/cookies",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 25 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-28",
+    "url": "https://ialovers.com/cookies",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 84 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-29",
+    "url": "https://ialovers.com/cookies",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1220.41ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-30",
+    "url": "https://ialovers.com/cookies",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-31",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 24 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-32",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 27 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-33",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Content",
+    "issue": "Thin Content",
+    "type": "warning",
+    "details": "Page has only 170 words (recommended: ≥300)"
+   },
+   {
+    "id": "issues-34",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Technical",
+    "issue": "Canonical URL Different",
+    "type": "warning",
+    "details": "Canonical points to: https://ialovers.com"
+   },
+   {
+    "id": "issues-35",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Structured Data",
+    "issue": "No Structured Data",
+    "type": "error",
+    "details": "Page has no JSON-LD or Schema.org markup"
+   },
+   {
+    "id": "issues-36",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1272.69ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-37",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   },
+   {
+    "id": "issues-38",
+    "url": "https://ialovers.com/app/subscribe?codename=ia-lovers&type=yearly&provider=stripe",
+    "category": "Indexability",
+    "issue": "Nofollow Tag Present",
+    "type": "error",
+    "details": "Links on this page are NOT followed by search engines - has nofollow directive"
+   },
+   {
+    "id": "issues-39",
+    "url": "https://ialovers.com/reembolsos",
+    "category": "SEO",
+    "issue": "Title Too Short",
+    "type": "warning",
+    "details": "Title is 25 characters (recommended: 30-60)"
+   },
+   {
+    "id": "issues-40",
+    "url": "https://ialovers.com/reembolsos",
+    "category": "SEO",
+    "issue": "Meta Description Too Short",
+    "type": "warning",
+    "details": "Description is 100 characters (recommended: 120-160)"
+   },
+   {
+    "id": "issues-41",
+    "url": "https://ialovers.com/reembolsos",
+    "category": "Performance",
+    "issue": "Moderate Response Time",
+    "type": "warning",
+    "details": "Page took 1266.9ms to respond (recommended: <1000ms)"
+   },
+   {
+    "id": "issues-42",
+    "url": "https://ialovers.com/reembolsos",
+    "category": "Indexability",
+    "issue": "Noindex Tag Present",
+    "type": "error",
+    "details": "Page is BLOCKED from search engines - has noindex directive"
+   }
+  ]
+ },
+ "comparison": {
+  "available": false,
+  "reason": "No se ha seleccionado un rastreo de referencia."
+ },
+ "enrichments": {
+  "gsc": {
+   "status": "not_connected",
+   "data": {}
+  },
+  "ga4": {
+   "status": "not_connected",
+   "data": {}
+  },
+  "crux": {
+   "status": "not_connected",
+   "data": {}
+  },
+  "pagespeed": {
+   "status": "not_connected",
+   "data": {}
+  }
+ },
+ "limitations": [
+  "Se descartaron 1 filas duplicadas de URL conservando el último registro por URL normalizada.",
+  "El rastreador realizó 16 peticiones y consolidó 15 URLs únicas; la diferencia corresponde a duplicados y variantes normalizadas.",
+  "En el momento del snapshot quedaban 3 URLs descubiertas sin procesar; el rastreo no agota el sitio.",
+  "No se ha cargado ningún sitemap XML; el solape sitemap–rastreo no puede calcularse.",
+  "La duración de la petición de rastreo no es una Core Web Vital ni una métrica de campo de usuario.",
+  "La evidencia de rastreo no acredita indexación en Google, tráfico, conversión ni ingresos."
+ ]
+}

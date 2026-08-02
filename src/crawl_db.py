@@ -80,6 +80,10 @@ def init_crawl_tables():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 crawl_id INTEGER NOT NULL,
                 url TEXT NOT NULL,
+                requested_url TEXT,
+                final_url TEXT,
+                redirect_chain TEXT,
+                in_sitemap BOOLEAN DEFAULT 0,
 
                 status_code INTEGER,
                 content_type TEXT,
@@ -129,6 +133,11 @@ def init_crawl_tables():
             cursor.execute('ALTER TABLE crawled_urls ADD COLUMN error_type TEXT')
         except sqlite3.OperationalError:
             pass  # Column already exists
+        for column in ('requested_url TEXT', 'final_url TEXT', 'redirect_chain TEXT', 'in_sitemap BOOLEAN DEFAULT 0'):
+            try:
+                cursor.execute(f'ALTER TABLE crawled_urls ADD COLUMN {column}')
+            except sqlite3.OperationalError:
+                pass
 
         # Links table
         cursor.execute('''
@@ -186,6 +195,17 @@ def init_crawl_tables():
             )
         ''')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crawl_enrichments (
+                crawl_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (crawl_id, source),
+                FOREIGN KEY (crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
+            )
+        ''')
+
         # Create indexes for performance
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawls_user_status ON crawls(user_id, status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawls_session ON crawls(session_id)')
@@ -199,6 +219,7 @@ def init_crawl_tables():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_url ON crawl_issues(crawl_id, url)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_category ON crawl_issues(crawl_id, category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_queue_crawl ON crawl_queue(crawl_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_enrichments_crawl ON crawl_enrichments(crawl_id)')
 
         if verbose_logs_enabled():
             print("Crawl persistence tables initialized successfully")
@@ -294,6 +315,10 @@ def save_url_batch(crawl_id, urls):
                 row = (
                     crawl_id,
                     url_data.get('url'),
+                    url_data.get('requested_url'),
+                    url_data.get('final_url'),
+                    json.dumps(url_data.get('redirect_chain', [])),
+                    url_data.get('in_sitemap', False),
                     url_data.get('status_code'),
                     url_data.get('content_type'),
                     url_data.get('size'),
@@ -330,14 +355,19 @@ def save_url_batch(crawl_id, urls):
 
             cursor.executemany('''
                 INSERT INTO crawled_urls (
-                    crawl_id, url, status_code, content_type, size, is_internal, depth,
+                    crawl_id, url, requested_url, final_url, redirect_chain, in_sitemap, status_code, content_type, size, is_internal, depth,
                     title, meta_description, h1, h2, h3, word_count,
                     canonical_url, lang, charset, viewport, robots,
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
                     error_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?
+                )
             ''', rows)
 
             if verbose_logs_enabled():
@@ -446,6 +476,77 @@ def save_checkpoint(crawl_id, checkpoint_data):
     except Exception as e:
         print(f"Error saving checkpoint: {e}")
         return False
+
+
+def update_crawl_target(crawl_id, base_url, base_domain):
+    """Persist a root redirect destination for future resume/reporting views."""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.update_target(crawl_id, base_url, base_domain)
+        except Exception as e:
+            print(f"Error updating crawl target: {e}")
+            return False
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE crawls SET base_url = ?, base_domain = ?, last_saved_at = CURRENT_TIMESTAMP WHERE id = ?',
+                (base_url, base_domain, crawl_id),
+            )
+            return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error updating crawl target: {e}")
+        return False
+
+
+def save_crawl_enrichment(crawl_id, source, payload):
+    """Store a non-secret enrichment snapshot for report reuse."""
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.save_enrichment(crawl_id, source, payload)
+        except Exception as e:
+            print(f"Error saving crawl enrichment: {e}")
+            return False
+    try:
+        with get_db() as conn:
+            conn.execute(
+                '''
+                INSERT INTO crawl_enrichments (crawl_id, source, payload, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(crawl_id, source) DO UPDATE SET payload = excluded.payload, updated_at = CURRENT_TIMESTAMP
+                ''',
+                (crawl_id, source, json.dumps(payload)),
+            )
+            return True
+    except Exception as e:
+        print(f"Error saving crawl enrichment: {e}")
+        return False
+
+
+def load_crawl_enrichments(crawl_id):
+    if metadata_postgres_enabled():
+        from src import crawl_metadata_pg
+        try:
+            return crawl_metadata_pg.load_enrichments(crawl_id)
+        except Exception as e:
+            print(f"Error loading crawl enrichments: {e}")
+            return {}
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT source, payload FROM crawl_enrichments WHERE crawl_id = ?', (crawl_id,))
+            result = {}
+            for row in cursor.fetchall():
+                try:
+                    result[row['source']] = json.loads(row['payload'])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    result[row['source']] = {'status': 'invalid'}
+            return result
+    except Exception as e:
+        print(f"Error loading crawl enrichments: {e}")
+        return {}
 
 def replace_crawl_queue(crawl_id, queue_items):
     """Replace persisted pending queue for a crawl."""
@@ -649,7 +750,7 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
                 # Parse JSON fields
                 for field in ['h2', 'h3', 'meta_tags', 'og_tags', 'twitter_tags',
                              'json_ld', 'analytics', 'images', 'hreflang',
-                             'schema_org', 'redirects', 'linked_from']:
+                             'schema_org', 'redirects', 'redirect_chain', 'linked_from']:
                     if url_data.get(field):
                         try:
                             url_data[field] = json.loads(url_data[field])

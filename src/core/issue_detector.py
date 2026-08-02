@@ -1,8 +1,27 @@
 """SEO issue detection and reporting"""
 import threading
 from fnmatch import fnmatch
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 from difflib import SequenceMatcher
+
+
+def _canonical_identity(value, base_url):
+    """Compare canonical URLs without a false mismatch for the root slash."""
+    if not value:
+        return ''
+    try:
+        absolute = urljoin(base_url, value)
+        parsed = urlsplit(absolute)
+        scheme = parsed.scheme.lower()
+        hostname = (parsed.hostname or '').lower()
+        port = parsed.port
+        netloc = hostname
+        if port and not ((scheme == 'https' and port == 443) or (scheme == 'http' and port == 80)):
+            netloc = f'{hostname}:{port}'
+        path = parsed.path or '/'
+        return urlunsplit((scheme, netloc, path, parsed.query, ''))
+    except ValueError:
+        return str(value).strip()
 
 
 class IssueDetector:
@@ -59,7 +78,7 @@ class IssueDetector:
                 'type': 'warning',
                 'category': 'SEO',
                 'issue': 'Title Too Long',
-                'details': f"Title is {len(title)} characters (recommended: ≤60)"
+                'details': f"Title is {len(title)} characters; review SERP rendering in context rather than treating length as a defect."
             })
         elif len(title) < 30:
             issues.append({
@@ -67,7 +86,7 @@ class IssueDetector:
                 'type': 'warning',
                 'category': 'SEO',
                 'issue': 'Title Too Short',
-                'details': f"Title is {len(title)} characters (recommended: 30-60)"
+                'details': f"Title is {len(title)} characters; review whether the page intent is represented clearly."
             })
 
     def _check_meta_description_issues(self, result, issues):
@@ -89,7 +108,7 @@ class IssueDetector:
                 'type': 'warning',
                 'category': 'SEO',
                 'issue': 'Meta Description Too Long',
-                'details': f"Description is {len(meta_desc)} characters (recommended: ≤160)"
+                'details': f"Description is {len(meta_desc)} characters; review SERP rendering in context rather than treating length as a defect."
             })
         elif len(meta_desc) < 120:
             issues.append({
@@ -97,7 +116,7 @@ class IssueDetector:
                 'type': 'warning',
                 'category': 'SEO',
                 'issue': 'Meta Description Too Short',
-                'details': f"Description is {len(meta_desc)} characters (recommended: 120-160)"
+                'details': f"Description is {len(meta_desc)} characters; review whether it is useful for the page intent."
             })
 
     def _check_heading_issues(self, result, issues):
@@ -194,13 +213,13 @@ class IssueDetector:
                 'issue': 'Missing Canonical URL',
                 'details': 'Page has no canonical URL specified'
             })
-        elif canonical_url != url:
+        elif _canonical_identity(canonical_url, url) != _canonical_identity(url, url):
             issues.append({
                 'url': url,
                 'type': 'warning',
                 'category': 'Technical',
                 'issue': 'Canonical URL Different',
-                'details': f"Canonical points to: {canonical_url}"
+                'details': f"Canonical points to: {canonical_url}; review whether this is intentional before changing it."
             })
 
     def _check_mobile_issues(self, result, issues):
@@ -270,10 +289,10 @@ class IssueDetector:
         if not result.get('json_ld') and not result.get('schema_org'):
             issues.append({
                 'url': url,
-                'type': 'error',
+                'type': 'info',
                 'category': 'Structured Data',
-                'issue': 'No Structured Data',
-                'details': 'Page has no JSON-LD or Schema.org markup'
+                'issue': 'Structured Data Opportunity',
+                'details': 'No JSON-LD or Schema.org markup was detected. Confirm whether a supported rich-result type is relevant before implementing it.'
             })
 
     def _check_performance_issues(self, result, issues):
@@ -285,18 +304,18 @@ class IssueDetector:
         if response_time > 3000:
             issues.append({
                 'url': url,
-                'type': 'error',
+                'type': 'warning',
                 'category': 'Performance',
-                'issue': 'Slow Response Time',
-                'details': f'Page took {response_time}ms to respond (recommended: <3000ms)'
+                'issue': 'Elevated Crawl Request Duration',
+                'details': f'The crawler measured {response_time}ms including request and parsing work. This is not a Core Web Vital; validate with Lighthouse or field data.'
             })
         elif response_time > 1000:
             issues.append({
                 'url': url,
-                'type': 'warning',
+                'type': 'info',
                 'category': 'Performance',
-                'issue': 'Moderate Response Time',
-                'details': f'Page took {response_time}ms to respond (recommended: <1000ms)'
+                'issue': 'Moderate Crawl Request Duration',
+                'details': f'The crawler measured {response_time}ms including request and parsing work. This is not a Core Web Vital.'
             })
 
         if page_size > 3 * 1024 * 1024:
@@ -324,19 +343,19 @@ class IssueDetector:
         if 'noindex' in robots:
             issues.append({
                 'url': url,
-                'type': 'error',
+                'type': 'info',
                 'category': 'Indexability',
-                'issue': 'Noindex Tag Present',
-                'details': 'Page is BLOCKED from search engines - has noindex directive'
+                'issue': 'Noindex Directive Present',
+                'details': 'The page has a noindex directive. Confirm whether exclusion from search is intentional for this URL type.'
             })
 
         if 'nofollow' in robots:
             issues.append({
                 'url': url,
-                'type': 'error',
+                'type': 'info',
                 'category': 'Indexability',
-                'issue': 'Nofollow Tag Present',
-                'details': 'Links on this page are NOT followed by search engines - has nofollow directive'
+                'issue': 'Nofollow Directive Present',
+                'details': 'The page has a nofollow directive. Confirm whether this is intentional before changing it.'
             })
 
     def _check_broken_image_issues(self, result, issues):

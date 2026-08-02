@@ -264,6 +264,12 @@ class SEOExtractor:
         """
         return {
             'url': url,
+            # Keep redirect provenance fields present even for network errors
+            # and files skipped before the final response is available.
+            'requested_url': url,
+            'final_url': url,
+            'redirect_chain': [],
+            'in_sitemap': None,
             'status_code': status_code,
             'error_type': error_type,
             'content_type': '',

@@ -1,8 +1,11 @@
 
 *.pyc
+.DS_Store
+.playwright-mcp/
 .claude/settings.local.json
 users.db
 data/*.db
+data/reports/
 
 .env
 .superpowers/

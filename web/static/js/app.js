@@ -24,8 +24,10 @@ let crawlState = {
             internalSearch: '',
             externalSearch: ''
         }
-    }
+    },
+    dashboardDrilldown: { urls: null, links: null, issues: null }
 };
+window.crawlState = crawlState;
 
 let serverPageState = {
     urls: { nextCursor: null, loaded: 0, hasMore: true, filter: 'all' },
@@ -238,6 +240,7 @@ function clearCrawlData() {
     crawlState.analytics = null;
     crawlState.baseUrl = null;
     crawlState.currentCrawlId = null;
+    crawlState.dashboardDrilldown = { urls: null, links: null, issues: null };
     resetServerPageState();
     crawlState.filters.active = null;
     crawlState.pendingLinks = null;
@@ -281,6 +284,7 @@ function clearCrawlData() {
     updateStatus('Datos borrados');
     hideProgress();
     updateCrawlButtons(); // Update save/load button states
+    if (window.CrawlOverviewDashboard) window.CrawlOverviewDashboard.reset();
 
     // Reset URL input
     document.getElementById('urlInput').value = '';
@@ -407,11 +411,19 @@ function getActiveTabName() {
 
 function getActiveServerTarget() {
     const tabName = getActiveTabName();
-    if (['overview', 'internal', 'external'].includes(tabName)) {
+    if (['internal', 'external'].includes(tabName)) {
+        const drilldown = crawlState.dashboardDrilldown.urls;
+        if (drilldown) {
+            return {
+                kind: 'urls',
+                filter: `dashboard:${JSON.stringify(drilldown)}:${tabName}`,
+                params: { scope: tabName, ...drilldown }
+            };
+        }
         const activeFilter = crawlState.filters.active || 'all';
         const serverKind = URL_SERVER_KINDS.includes(activeFilter)
             ? activeFilter
-            : (tabName === 'overview' ? 'all' : tabName);
+            : tabName;
         return {
             kind: 'urls',
             filter: `${tabName}:${activeFilter}`,
@@ -419,6 +431,14 @@ function getActiveServerTarget() {
         };
     }
     if (tabName === 'links') {
+        const drilldown = crawlState.dashboardDrilldown.links;
+        if (drilldown) {
+            return {
+                kind: 'links',
+                filter: `dashboard:${JSON.stringify(drilldown)}`,
+                params: drilldown
+            };
+        }
         const linkKind = getActiveLinkServerKind();
         return {
             kind: 'links',
@@ -427,6 +447,19 @@ function getActiveServerTarget() {
         };
     }
     if (tabName === 'issues') {
+        const drilldown = crawlState.dashboardDrilldown.issues;
+        if (drilldown) {
+            const params = { ...drilldown };
+            if (Array.isArray(params.issues)) {
+                params.issue = params.issues;
+                delete params.issues;
+            }
+            return {
+                kind: 'issues',
+                filter: `dashboard:${JSON.stringify(params)}`,
+                params
+            };
+        }
         const issueType = crawlState.filters.issueFilter || 'all';
         return {
             kind: 'issues',
@@ -473,7 +506,10 @@ async function loadServerRows(kind, reset = false) {
     if (state.nextCursor !== null && state.nextCursor !== undefined) {
         params.set('after', state.nextCursor);
     }
-    Object.entries(target.params).forEach(([key, value]) => params.set(key, value));
+    Object.entries(target.params).forEach(([key, value]) => {
+        if (Array.isArray(value)) value.forEach(item => params.append(key, item));
+        else params.set(key, value);
+    });
 
     try {
         const response = await fetch(`/api/crawls/${crawlId}/${kind}?${params.toString()}`);
@@ -517,6 +553,20 @@ function mergeRows(existing, rows, keyFn) {
     return Array.from(byKey.values()).slice(-CLIENT_ROW_LIMIT);
 }
 
+function issueRowKey(row) {
+    const rowOrder = row && row._row_order;
+    if (typeof rowOrder === 'string' && rowOrder.length > 0) {
+        return `row-order:${rowOrder}`;
+    }
+    if (Number.isSafeInteger(rowOrder)) {
+        return `row-order:${rowOrder}`;
+    }
+
+    // Older servers sent UInt64 cursors as unsafe JS numbers. Fall back to
+    // the issue payload instead of collapsing unrelated rows in that case.
+    return `issue:${row?.url || ''}|${row?.type || ''}|${row?.category || ''}|${row?.issue || ''}|${row?.details || ''}`;
+}
+
 function appendServerRows(kind, rows) {
     if (!rows.length) return;
 
@@ -534,7 +584,7 @@ function appendServerRows(kind, rows) {
         crawlState.issues = mergeRows(
             crawlState.issues,
             rows,
-            row => row._row_order || `${row.url}|${row.type}|${row.category}|${row.issue}|${row.details}`
+            issueRowKey
         );
         updateIssuesTable(crawlState.issues);
         if (crawlState.filters.issueFilter !== 'all') {
@@ -1199,13 +1249,14 @@ function addRowToTable(tableBodyId, rowData) {
 }
 
 // Tab Management
-function switchTab(tabName) {
+function switchTab(tabName, trigger = null) {
     // Remove active class from all tabs and panes
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
 
     // Add active class to selected tab and pane
-    event.target.classList.add('active');
+    const tabButton = trigger || document.querySelector(`.tab-btn[onclick*="'${tabName}'"]`);
+    if (tabButton) tabButton.classList.add('active');
     document.getElementById(tabName + '-tab').classList.add('active');
 
     // Load pending links data if switching to Links tab
@@ -1234,10 +1285,55 @@ function switchTab(tabName) {
         handlePluginTabSwitch(tabName);
     }
 
-    if (['overview', 'internal', 'external', 'links', 'issues'].includes(tabName)) {
+    renderDashboardDrilldownContext(tabName);
+    if (tabName === 'overview') {
+        if (window.CrawlOverviewDashboard) {
+            window.CrawlOverviewDashboard.refresh();
+            window.CrawlOverviewDashboard.renderLocal();
+        }
+    } else if (['internal', 'external', 'links', 'issues'].includes(tabName)) {
         loadActiveTabPage(true);
     }
 }
+
+function renderDashboardDrilldownContext(tabName) {
+    const pane = document.getElementById(`${tabName}-tab`);
+    if (!pane) return;
+    pane.querySelector('.dashboard-drilldown-context')?.remove();
+    const key = tabName === 'issues' ? 'issues' : tabName === 'links' ? 'links' : 'urls';
+    const drilldown = crawlState.dashboardDrilldown[key];
+    if (!drilldown) return;
+    const label = tabName === 'issues' ? 'Incidencias filtradas desde Resumen' : tabName === 'links' ? 'Enlaces filtrados desde Resumen' : 'URLs filtradas desde Resumen';
+    const context = document.createElement('div');
+    context.className = 'dashboard-drilldown-context';
+    context.innerHTML = `<span>${label}</span><button type="button" aria-label="Quitar filtro">Quitar filtro</button>`;
+    context.querySelector('button').addEventListener('click', () => clearDashboardDrilldown(key));
+    pane.prepend(context);
+}
+
+function clearDashboardDrilldown(key) {
+    crawlState.dashboardDrilldown[key] = null;
+    const activeTab = getActiveTabName();
+    renderDashboardDrilldownContext(activeTab);
+    loadActiveTabPage(true);
+}
+
+window.openDashboardUrlDrilldown = function(filters) {
+    crawlState.dashboardDrilldown.urls = filters;
+    crawlState.filters.active = null;
+    switchTab('internal');
+};
+
+window.openDashboardIssueDrilldown = function(filters) {
+    crawlState.dashboardDrilldown.issues = filters;
+    crawlState.filters.issueFilter = 'all';
+    switchTab('issues');
+};
+
+window.openDashboardLinkDrilldown = function(filters) {
+    crawlState.dashboardDrilldown.links = filters;
+    switchTab('links');
+};
 
 // Handle plugin tab activation
 function handlePluginTabSwitch(tabName) {
@@ -2262,6 +2358,12 @@ function loadCrawl() {
             // Clear current data
             clearAllTables();
             resetStats();
+            // Imported JSON is self-contained and must not poll the previously selected server crawl.
+            crawlState.currentCrawlId = null;
+            crawlState.isRunning = false;
+            crawlState.isPaused = false;
+            crawlState.dashboardDrilldown = { urls: null, links: null, issues: null };
+            resetServerPageState();
 
             // Load the data
             crawlState.baseUrl = saveData.baseUrl;
@@ -2395,6 +2497,7 @@ function loadCrawl() {
             }
 
             showNotification(`Rastreo cargado: ${saveData.stats.crawled} URLs de ${new Date(saveData.timestamp).toLocaleDateString()}`, 'success');
+            if (window.CrawlOverviewDashboard) window.CrawlOverviewDashboard.renderLocal();
 
         } catch (error) {
             console.error('Load error:', error);

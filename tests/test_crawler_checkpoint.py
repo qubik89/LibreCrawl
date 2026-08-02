@@ -20,6 +20,50 @@ from src.crawler import WebCrawler
 
 
 class CrawlerCheckpointTests(unittest.TestCase):
+    def test_process_pool_html_analysis_returns_the_worker_result(self):
+        crawler = WebCrawler()
+        expected = {'title': 'Processed outside the request worker'}
+
+        class Future:
+            def result(self):
+                return expected
+
+        class Pool:
+            def submit(self, *_args):
+                return Future()
+
+        crawler.html_process_pool = Pool()
+        crawler.base_domain = 'example.com'
+        response = SimpleNamespace(
+            content=b'<html><title>Example</title></html>',
+            status_code=200,
+            headers={'content-type': 'text/html; charset=utf-8'},
+            encoding='utf-8',
+        )
+
+        self.assertEqual(
+            crawler._analyze_html_content(response, 'https://example.com/', 0, True),
+            expected,
+        )
+
+    def test_root_cross_domain_redirect_adopts_destination_without_losing_origin(self):
+        crawler = WebCrawler()
+        crawler.base_url = 'https://soywebmaster.com'
+        crawler.base_domain = 'soywebmaster.com'
+        crawler.config['discover_sitemaps'] = False
+        crawler.link_manager = SimpleNamespace(base_domain='soywebmaster.com')
+
+        with mock.patch('src.crawler.SitemapParser') as sitemap_parser:
+            adopted = crawler._adopt_root_redirect_target(
+                'https://soywebmaster.com/', 'https://davidayala.com/', 0,
+            )
+
+        self.assertTrue(adopted)
+        self.assertEqual(crawler.base_url, 'https://davidayala.com')
+        self.assertEqual(crawler.base_domain, 'davidayala.com')
+        self.assertEqual(crawler.link_manager.base_domain, 'davidayala.com')
+        sitemap_parser.assert_called_once()
+
     def test_queue_checkpoint_is_throttled_unless_forced(self):
         crawler = WebCrawler()
         crawler.crawl_id = 7

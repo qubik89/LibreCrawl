@@ -4,6 +4,10 @@ from unittest import mock
 from src import reporting_settings
 from src.openrouter_client import (
     OpenRouterClient,
+    generate_report_analysis,
+    generate_report_document,
+    generate_report_quality_review,
+    generate_report_repair,
     generate_report_markdown,
     generate_structured_findings,
     refresh_models,
@@ -126,7 +130,7 @@ class OpenRouterClientTest(unittest.TestCase):
         self.assertEqual(usage, {'prompt_tokens': 11})
         _, messages, params = client.chat_completion.call_args.args
         self.assertEqual(params, {'max_tokens': 2000})
-        self.assertIn('Technical tone', messages[0]['content'])
+        self.assertIn('Technical product', messages[0]['content'])
         self.assertIn('"crawl_id": 5', messages[1]['content'])
 
         client.reset_mock()
@@ -158,6 +162,48 @@ class OpenRouterClientTest(unittest.TestCase):
         get_model.assert_called_once_with('anthropic/claude')
         _, _, params = client.chat_completion.call_args.args
         self.assertEqual(params, {'max_tokens': 4000, 'temperature': 0.2})
+
+    def test_v2_generation_helpers_request_json_when_supported(self):
+        client = mock.Mock()
+        client.chat_completion.return_value = {
+            'choices': [{'message': {'content': '{}'}}],
+            'usage': {'total_tokens': 4},
+        }
+        metadata = {'supported_parameters': ['max_tokens', 'temperature', 'response_format']}
+        bundle = get_prompt_bundle('es-ES', 'commercial', 'prospect')
+        facts = {'schema_version': '2.0', 'crawl': {'id': 4}}
+
+        generate_report_analysis(client, 'anthropic/claude-opus-4.7', facts, bundle, metadata)
+        _, messages, params = client.chat_completion.call_args.args
+        self.assertEqual(params['response_format'], {'type': 'json_object'})
+        self.assertEqual(params['max_tokens'], 6000)
+        self.assertIn('AuditFactsV2', messages[1]['content'])
+
+        client.reset_mock()
+        generate_report_document(client, 'anthropic/claude-opus-4.7', facts, {'findings': []}, bundle, {}, metadata)
+        _, _, params = client.chat_completion.call_args.args
+        self.assertEqual(params['max_tokens'], 9000)
+        self.assertEqual(params['response_format'], {'type': 'json_object'})
+
+        client.reset_mock()
+        generate_report_quality_review(
+            client, 'anthropic/claude-opus-4.7', facts, {'findings': []},
+            {'sections': []}, bundle, {'passed': True}, metadata,
+        )
+        _, messages, params = client.chat_completion.call_args.args
+        self.assertEqual(params['max_tokens'], 4000)
+        self.assertEqual(params['temperature'], 0)
+        self.assertIn('Deterministic review JSON', messages[1]['content'])
+
+        client.reset_mock()
+        generate_report_repair(
+            client, 'anthropic/claude-opus-4.7', facts, {'findings': []},
+            {'sections': []}, {'verdict': 'fail'}, bundle, {}, metadata,
+        )
+        _, messages, params = client.chat_completion.call_args.args
+        self.assertEqual(params['max_tokens'], 10000)
+        self.assertEqual(params['temperature'], 0)
+        self.assertIn('Immutable AuditFactsV2 JSON', messages[1]['content'])
 
 
 if __name__ == '__main__':

@@ -266,7 +266,7 @@ def get_user_by_id(user_id):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, username, email, verified, created_at, last_login
+                SELECT id, username, email, verified, tier, created_at, last_login
                 FROM users
                 WHERE id = ?
             ''', (user_id,))
@@ -311,7 +311,7 @@ def get_all_users():
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, username, email, verified, created_at, last_login
+                SELECT id, username, email, verified, tier, created_at, last_login
                 FROM users
                 ORDER BY created_at DESC
             ''')

@@ -29,6 +29,16 @@ class ReportingPromptsTest(unittest.TestCase):
         self.assertEqual(bundle['report_writer_system_prompt'], REPORT_WRITER_SYSTEM_PROMPT_EN)
         self.assertIn('english', bundle['language_prompt'].lower())
         self.assertIn('technical', bundle['tone_prompt'].lower())
+        self.assertIn('independent reviewer', bundle['quality_review_system_prompt'].lower())
+        self.assertIn('one minimal repair', bundle['repair_system_prompt'].lower())
+
+    def test_spanish_products_and_quality_prompts_are_fully_localized(self):
+        bundle = get_prompt_bundle('es-ES', 'technical')
+
+        self.assertIn('producto técnico', bundle['tone_prompt'].lower())
+        self.assertIn('criterios de aceptación', bundle['tone_prompt'].lower())
+        self.assertIn('revisor independiente', bundle['quality_review_system_prompt'].lower())
+        self.assertIn('una única reparación', bundle['repair_system_prompt'].lower())
 
     def test_get_prompt_bundle_falls_back_for_unknown_options(self):
         bundle = get_prompt_bundle('fr', 'casual')

@@ -207,7 +207,7 @@ def _status_row(row):
 
 def _compact_url_row(row):
     return _pick(row, [
-        'url', 'status_code', 'error_type', 'content_type', 'is_internal', 'depth',
+        'url', 'requested_url', 'final_url', 'redirect_chain', 'status_code', 'error_type', 'content_type', 'is_internal', 'depth',
         'title', 'meta_description', 'h1', 'word_count', 'canonical_url', 'lang',
         'robots', 'internal_links', 'external_links', 'response_time',
         'javascript_rendered',

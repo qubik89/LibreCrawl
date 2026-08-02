@@ -269,14 +269,15 @@ let reportSettings = {};
 let reportModels = [];
 let currentSettingsTier = 'guest';
 const defaultReportSettings = {
-    default_model: '',
+    default_model: 'anthropic/claude-opus-4.7',
     manual_model: '',
     default_language: 'es-ES',
-    default_tone: 'executive',
-    agency_name: 'Mitmore SEO Crawl',
-    primary_color: '#2563eb',
-    footer_text: '',
-    logo_path: '',
+    default_report_mode: 'pack',
+    default_commercial_context: 'prospect',
+    issuer: { name: '', author: '', contact: '', confidentiality: '', cta: '' },
+    appearance: { primary_color: '#1d4ed8', secondary_color: '#334155', accent_color: '#b45309', logo_asset_id: '' },
+    capabilities: { reports_v2_enabled: false, quality_threshold: 90 },
+    logo: null,
     has_openrouter_api_key: false,
     masked_openrouter_api_key: ''
 };
@@ -757,7 +758,6 @@ async function loadReportModels() {
         if (data.success) {
             reportModels = data.models || [];
             populateReportModelSelect('reportModelSelect', reportSettings.default_model);
-            populateReportModelSelect('reportGenerateModelSelect', reportSettings.default_model, true);
         }
     } catch (error) {
         console.warn('Failed to load report models:', error);
@@ -792,11 +792,21 @@ function populateReportSettingsForm() {
     populateReportModelSelect('reportModelSelect', reportSettings.default_model);
     setElementValue('reportManualModel', reportSettings.manual_model);
     setElementValue('reportDefaultLanguage', reportSettings.default_language || 'es-ES');
-    setElementValue('reportDefaultTone', reportSettings.default_tone || 'executive');
-    setElementValue('reportAgencyName', reportSettings.agency_name || 'Mitmore SEO Crawl');
-    setElementValue('reportPrimaryColor', reportSettings.primary_color || '#2563eb');
-    setElementValue('reportFooterText', reportSettings.footer_text || '');
-    setElementValue('reportLogoPath', reportSettings.logo_path || '');
+    setElementValue('reportDefaultMode', reportSettings.default_report_mode || 'pack');
+    setElementValue('reportDefaultCommercialContext', reportSettings.default_commercial_context || 'prospect');
+    const issuer = reportSettings.issuer || {};
+    const appearance = reportSettings.appearance || {};
+    setElementValue('reportIssuerName', issuer.name || '');
+    setElementValue('reportDefaultAuthor', issuer.author || '');
+    setElementValue('reportDefaultContact', issuer.contact || '');
+    setElementValue('reportDefaultConfidentiality', issuer.confidentiality || '');
+    setElementValue('reportDefaultCta', issuer.cta || '');
+    setElementValue('reportPrimaryColor', appearance.primary_color || '#1d4ed8');
+    setElementValue('reportSecondaryColor', appearance.secondary_color || '#334155');
+    setElementValue('reportAccentColor', appearance.accent_color || '#b45309');
+    const capability = document.getElementById('reportV2Capability');
+    if (capability) capability.textContent = reportSettings.capabilities?.reports_v2_enabled ? 'V2 activa' : 'V2 pendiente de activación';
+    renderReportLogo(reportSettings.logo);
 }
 
 function setElementValue(id, value) {
@@ -809,15 +819,76 @@ function setElementValue(id, value) {
 function collectReportSettingsFromForm() {
     return {
         openrouter_api_key: document.getElementById('reportOpenRouterApiKey')?.value || '',
-        default_model: document.getElementById('reportModelSelect')?.value || '',
+        default_model: document.getElementById('reportModelSelect')?.value || reportSettings.default_model || 'anthropic/claude-opus-4.7',
         manual_model: document.getElementById('reportManualModel')?.value || '',
         default_language: document.getElementById('reportDefaultLanguage')?.value || 'es-ES',
-        default_tone: document.getElementById('reportDefaultTone')?.value || 'executive',
-        agency_name: document.getElementById('reportAgencyName')?.value || '',
-        primary_color: document.getElementById('reportPrimaryColor')?.value || '#2563eb',
-        footer_text: document.getElementById('reportFooterText')?.value || '',
-        logo_path: document.getElementById('reportLogoPath')?.value || ''
+        default_report_mode: document.getElementById('reportDefaultMode')?.value || 'pack',
+        default_commercial_context: document.getElementById('reportDefaultCommercialContext')?.value || 'prospect',
+        issuer: {
+            name: document.getElementById('reportIssuerName')?.value || '',
+            author: document.getElementById('reportDefaultAuthor')?.value || '',
+            contact: document.getElementById('reportDefaultContact')?.value || '',
+            confidentiality: document.getElementById('reportDefaultConfidentiality')?.value || '',
+            cta: document.getElementById('reportDefaultCta')?.value || ''
+        },
+        appearance: {
+            primary_color: document.getElementById('reportPrimaryColor')?.value || '#1d4ed8',
+            secondary_color: document.getElementById('reportSecondaryColor')?.value || '#334155',
+            accent_color: document.getElementById('reportAccentColor')?.value || '#b45309',
+            logo_asset_id: reportSettings.appearance?.logo_asset_id || ''
+        }
     };
+}
+
+function renderReportLogo(logo) {
+    const preview = document.getElementById('reportLogoPreview');
+    const image = preview?.querySelector('img');
+    if (!preview || !image) return;
+    if (!logo?.preview_url) {
+        preview.hidden = true;
+        image.removeAttribute('src');
+        return;
+    }
+    image.src = logo.preview_url;
+    preview.hidden = false;
+    const status = document.getElementById('reportLogoStatus');
+    if (status) status.textContent = logo.original_name || 'Logo guardado';
+}
+
+async function uploadReportLogo(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    try {
+        const response = await fetch('/api/report-assets/logo', { method: 'POST', body });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'No se pudo subir el logo');
+        reportSettings.logo = data.asset;
+        reportSettings.appearance = { ...(reportSettings.appearance || {}), logo_asset_id: data.asset.asset_id };
+        renderReportLogo(data.asset);
+        await saveReportSettings();
+        reportNotice('Logo guardado', 'success');
+    } catch (error) {
+        reportNotice(error.message || 'No se pudo subir el logo', 'error');
+        input.value = '';
+    }
+}
+
+async function removeReportLogo() {
+    const assetId = reportSettings.appearance?.logo_asset_id;
+    if (!assetId) return;
+    try {
+        const response = await fetch(`/api/report-assets/logo/${encodeURIComponent(assetId)}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'No se pudo quitar el logo');
+        reportSettings.appearance.logo_asset_id = '';
+        reportSettings.logo = null;
+        renderReportLogo(null);
+        await saveReportSettings();
+    } catch (error) {
+        reportNotice(error.message || 'No se pudo quitar el logo', 'error');
+    }
 }
 
 async function saveReportSettings() {
@@ -863,7 +934,6 @@ async function refreshReportModels() {
         }
         reportModels = data.models || [];
         populateReportModelSelect('reportModelSelect', reportSettings.default_model);
-        populateReportModelSelect('reportGenerateModelSelect', reportSettings.default_model, true);
         reportNotice('Modelos de informe actualizados', 'success');
     } catch (error) {
         console.error('Error refreshing report models:', error);
@@ -1057,6 +1127,8 @@ window.getReportSettings = function() {
 window.loadReportSettings = loadReportSettings;
 window.loadReportModels = loadReportModels;
 window.populateReportModelSelect = populateReportModelSelect;
+window.uploadReportLogo = uploadReportLogo;
+window.removeReportLogo = removeReportLogo;
 
 // Apply custom CSS to the page
 function applyCustomCSS() {

@@ -10,6 +10,7 @@ psutil
 bcrypt==4.1.2
 markdown
 python-dotenv
+Pillow>=10.0
 clickhouse-connect==0.9.2
 psycopg[binary]
 openpyxl==3.1.5

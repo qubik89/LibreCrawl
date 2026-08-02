@@ -116,7 +116,7 @@ def authenticate_user(username, verify_password):
 def get_user_by_id(user_id):
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, email, verified, created_at, last_login FROM users WHERE id = %s', (user_id,))
+        cursor.execute('SELECT id, username, email, verified, tier, created_at, last_login FROM users WHERE id = %s', (user_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -132,7 +132,7 @@ def get_user_by_username(username):
 def get_all_users():
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id, username, email, verified, created_at, last_login FROM users ORDER BY created_at DESC')
+        cursor.execute('SELECT id, username, email, verified, tier, created_at, last_login FROM users ORDER BY created_at DESC')
         return [dict(row) for row in cursor.fetchall()]
 
 

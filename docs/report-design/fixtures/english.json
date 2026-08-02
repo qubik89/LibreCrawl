@@ -1,0 +1,95 @@
+{
+  "schema_version": "2.0",
+  "crawl": {
+    "id": "fixture-en",
+    "base_url": "https://example.test",
+    "base_domain": "example.test",
+    "final_domain": "example.test",
+    "started_at": "2026-08-01T09:00:00Z",
+    "completed_at": "2026-08-01T09:02:00Z"
+  },
+  "coverage": {
+    "source": "fixture",
+    "deduplication": "latest row per URL, issue key, and link edge",
+    "denominators": {
+      "discovered_urls": 8,
+      "unique_urls": 8,
+      "internal_urls": 7,
+      "html_2xx_urls": 7,
+      "indexable_html_urls": 6,
+      "unique_links": 14,
+      "unique_issues": 3,
+      "sitemap_urls": 6,
+      "sitemap_crawl_overlap_urls": 6
+    },
+    "coverage_ratio": 100
+  },
+  "thematic_metrics": {
+    "http": {"2xx": 7, "3xx": 1, "4xx": 0, "5xx": 0, "no_response": 0},
+    "content": {
+      "missing_title": 1,
+      "missing_meta_description": 2,
+      "missing_h1": 0,
+      "thin_content_under_300_words": 2,
+      "denominator": 7
+    },
+    "indexability": {
+      "indexable_html_urls": 6,
+      "noindex_html_urls": 1,
+      "denominator": 7
+    },
+    "links": {"unique_edges": 14, "internal_edges": 11},
+    "performance": {
+      "source": "crawl_request_duration",
+      "count": 8,
+      "p50_ms": 180,
+      "p75_ms": 240,
+      "p90_ms": 390,
+      "p95_ms": 460
+    }
+  },
+  "distributions": {
+    "status_codes": [
+      {"label": "200", "count": 7},
+      {"label": "301", "count": 1}
+    ],
+    "issue_groups": [
+      {"category": "Content", "issue": "Missing meta description", "type": "warning", "count": 2},
+      {"category": "Indexability", "issue": "Declared noindex", "type": "info", "count": 1}
+    ],
+    "depth": [
+      {"label": "0", "count": 1},
+      {"label": "1", "count": 5},
+      {"label": "2", "count": 2}
+    ]
+  },
+  "evidence": {
+    "urls": [
+      {"id": "urls-1", "url": "https://example.test/", "status_code": 200, "depth": 0, "word_count": 520},
+      {"id": "urls-2", "url": "https://example.test/services", "status_code": 200, "depth": 1, "word_count": 180}
+    ],
+    "issues": [
+      {"id": "issues-1", "url": "https://example.test/services", "category": "Content", "issue": "Missing meta description", "type": "warning"}
+    ],
+    "links": [
+      {"id": "links-1", "source_url": "https://example.test/", "target_url": "https://example.test/services", "is_internal": true, "placement": "navigation"}
+    ]
+  },
+  "comparison": {"available": false, "reason": "No baseline crawl selected."},
+  "enrichments": {
+    "gsc": {"status": "not_connected", "data": {}},
+    "ga4": {"status": "not_connected", "data": {}},
+    "crux": {"status": "not_connected", "data": {}},
+    "pagespeed": {"status": "not_connected", "data": {}}
+  },
+  "limitations": [
+    "The crawl describes technical accessibility and declared indexability, not Google indexing.",
+    "Crawl request duration is not a field performance metric or Core Web Vital.",
+    "No traffic, conversion, or revenue data is connected."
+  ],
+  "metric_catalog": [
+    {"id": "coverage.denominators.unique_urls", "value": 8},
+    {"id": "coverage.denominators.html_2xx_urls", "value": 7},
+    {"id": "thematic_metrics.indexability.indexable_html_urls", "value": 6, "denominator_id": "coverage.denominators.html_2xx_urls", "denominator": 7}
+  ]
+}

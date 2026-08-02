@@ -97,6 +97,19 @@ def _env_int(name, default, minimum=None, maximum=None):
     return value
 
 
+def _sitemap_identity(value):
+    """Normalise sitemap membership keys without changing query semantics."""
+    try:
+        parsed = urlparse(str(value or '').strip())
+        if not parsed.scheme or not parsed.netloc:
+            return str(value or '').strip()
+        path = parsed.path or '/'
+        suffix = f'?{parsed.query}' if parsed.query else ''
+        return f'{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}{suffix}'
+    except ValueError:
+        return str(value or '').strip()
+
+
 def _env_csv(name, default=None):
     value = os.getenv(name)
     if value is None:
@@ -137,6 +150,7 @@ class WebCrawler:
         # Results storage
         self.crawl_results = []
         self.url_statuses = {}
+        self.sitemap_urls = set()
         self.results_lock = threading.Lock()
         self.verbose_logs = os.environ.get('CRAWL_VERBOSE_LOGS', '').lower() in ('1', 'true', 'yes', 'on')
 
@@ -471,6 +485,7 @@ class WebCrawler:
 
         self.crawl_results.clear()
         self.url_statuses.clear()
+        self.sitemap_urls.clear()
         self.stats = {
             'discovered': 0,
             'crawled': 0,
@@ -492,6 +507,9 @@ class WebCrawler:
         filtered_count = 0
 
         for url in sitemap_urls:
+            identity = _sitemap_identity(url)
+            if identity:
+                self.sitemap_urls.add(identity)
             if self._should_crawl_url(url):
                 self.link_manager.add_url(url, 0)
                 added_count += 1
@@ -500,6 +518,11 @@ class WebCrawler:
 
         self.stats['discovered'] = self.link_manager.get_stats()['discovered']
         self._log_verbose(f"Sitemap processing: {added_count} added, {filtered_count} filtered")
+
+    def _is_sitemap_url(self, requested_url, final_url=None):
+        """Return whether either side of a redirect belonged to a sitemap."""
+        identities = {_sitemap_identity(requested_url), _sitemap_identity(final_url)}
+        return bool((identities - {''}) & self.sitemap_urls)
 
     def stop_crawl(self):
         """Stop the current crawl"""
@@ -1193,6 +1216,35 @@ class WebCrawler:
             print(f"HTML process analysis failed: {e}")
             return analyze_html_content(*args)
 
+    def _adopt_root_redirect_target(self, requested_url, final_url, depth):
+        """Treat a root cross-domain redirect as a migration, not an external page.
+
+        The original URL remains on the result as ``requested_url`` while the
+        crawl target, relative-link base, and sitemap discovery move to the
+        canonical destination.  Non-root redirects never change crawl scope.
+        """
+        if depth != 0 or not final_url or final_url == requested_url:
+            return False
+        requested = urlparse(requested_url)
+        final = urlparse(final_url)
+        if requested.path not in ('', '/') or not final.netloc or final.netloc == self.base_domain:
+            return False
+        self.base_url = f'{final.scheme}://{final.netloc}'
+        self.base_domain = final.netloc
+        if self.link_manager:
+            self.link_manager.base_domain = final.netloc
+        self.sitemap_parser = SitemapParser(self.session, self.base_domain, self.config['timeout'])
+        if self.crawl_id:
+            try:
+                from src.crawl_db import update_crawl_target
+                update_crawl_target(self.crawl_id, self.base_url, self.base_domain)
+            except Exception as exc:
+                self._log_verbose(f'Could not persist redirect target: {exc}')
+        self._log_verbose(f'Root redirect detected: {requested_url} -> {final_url}; using destination as crawl target.')
+        if self.config.get('discover_sitemaps', True):
+            self._discover_and_add_sitemap_urls(final_url)
+        return True
+
     def _crawl_url_with_requests(self, url, depth):
         """Crawl a single URL using traditional HTTP requests"""
         self._log_verbose(f"Starting crawl of {url}")
@@ -1212,11 +1264,13 @@ class WebCrawler:
                     content_length = head_response.headers.get('content-length')
                     if content_length and int(content_length) > self.config['max_file_size']:
                         self._perf_add(**perf)
-                        return self.seo_extractor.create_empty_result(
+                        result = self.seo_extractor.create_empty_result(
                             url, depth, 0,
                             f'File too large: {content_length} bytes',
                             error_type='file_too_large'
                         )
+                        result['in_sitemap'] = self._is_sitemap_url(url, url)
+                        return result
                 except:
                     pass  # Continue if HEAD request fails
 
@@ -1237,12 +1291,25 @@ class WebCrawler:
                     time.sleep(1)
             perf['fetch_ms'] = (time.perf_counter() - fetch_start) * 1000
 
-            # Determine if URL is internal
-            is_internal = self.link_manager.is_internal(url)
+            final_url = response.url or url
+            redirect_chain = [
+                {'url': item.url, 'status_code': item.status_code}
+                for item in (response.history or [])
+            ]
+            if redirect_chain or final_url != url:
+                redirect_chain.append({'url': final_url, 'status_code': response.status_code})
+            self._adopt_root_redirect_target(url, final_url, depth)
+
+            # Classify and resolve the fetched document using the final URL.
+            is_internal = self.link_manager.is_internal(final_url)
 
             # Create result structure
             result = {
-                'url': url,
+                'url': final_url,
+                'requested_url': url,
+                'final_url': final_url,
+                'in_sitemap': self._is_sitemap_url(url, final_url),
+                'redirect_chain': redirect_chain,
                 'status_code': response.status_code,
                 'error_type': None,
                 'content_type': response.headers.get('content-type', '').split(';')[0],
@@ -1281,7 +1348,7 @@ class WebCrawler:
                 'external_links': 0,
                 'internal_links': 0,
                 'response_time': 0,
-                'redirects': [],
+                'redirects': redirect_chain,
                 'hreflang': [],
                 'schema_org': [],
                 'linked_from': []
@@ -1290,9 +1357,14 @@ class WebCrawler:
             # Only parse HTML content
             if 'text/html' in response.headers.get('content-type', ''):
                 html_start = time.perf_counter()
-                analysis = self._analyze_html_content(response, url, depth, is_internal)
+                analysis = self._analyze_html_content(response, final_url, depth, is_internal)
                 perf['html_ms'] = (time.perf_counter() - html_start) * 1000
                 result = analysis['result']
+                result['requested_url'] = url
+                result['final_url'] = final_url
+                result['in_sitemap'] = self._is_sitemap_url(url, final_url)
+                result['redirect_chain'] = redirect_chain
+                result['redirects'] = redirect_chain
 
                 if self.config.get('persist_links', True):
                     links_start = time.perf_counter()
@@ -1329,13 +1401,13 @@ class WebCrawler:
                     discover_start = time.perf_counter()
                     self.link_manager.apply_discovered_urls(
                         analysis.get('discovered_urls', []),
-                        url,
+                        final_url,
                         self._should_crawl_url,
                     )
                     perf['discover_ms'] = (time.perf_counter() - discover_start) * 1000
 
             # Populate linked_from after all link collection is complete
-            result['linked_from'] = self.link_manager.get_source_pages(url)
+            result['linked_from'] = self.link_manager.get_source_pages(final_url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
             # Add to unsaved batch if DB persistence enabled
@@ -1410,6 +1482,10 @@ class WebCrawler:
                 'internal_links': 0,
                 'response_time': 0,
                 'redirects': [],
+                'requested_url': url,
+                'final_url': url,
+                'in_sitemap': self._is_sitemap_url(url, url),
+                'redirect_chain': [],
                 'hreflang': [],
                 'schema_org': [],
                 'linked_from': [],
@@ -1757,6 +1833,15 @@ class WebCrawler:
                     time.sleep(3)
 
             self.stats['pagespeed_results'] = pagespeed_results
+            if self.db_save_enabled and self.crawl_id:
+                try:
+                    from src.crawl_db import save_crawl_enrichment
+                    save_crawl_enrichment(self.crawl_id, 'pagespeed', {
+                        'status': 'available',
+                        'data': {'pages': pagespeed_results, 'source': 'lighthouse_lab'},
+                    })
+                except Exception as exc:
+                    self._log_verbose(f'Could not persist PageSpeed results: {exc}')
             self._log_verbose(f"PageSpeed analysis completed for {len(pagespeed_results)} pages")
 
         except Exception as e:
@@ -1845,9 +1930,9 @@ class WebCrawler:
                             cls = audits['cumulative-layout-shift'].get('numericValue')
                             metrics['cumulative_layout_shift'] = round(cls, 3) if cls else None
 
-                        if 'max-potential-fid' in audits:
-                            fid = audits['max-potential-fid'].get('numericValue')
-                            metrics['first_input_delay'] = round(fid, 2) if fid else None
+                        if 'interaction-to-next-paint' in audits:
+                            inp = audits['interaction-to-next-paint'].get('numericValue')
+                            metrics['interaction_to_next_paint'] = round(inp, 2) if inp else None
 
                         if 'speed-index' in audits:
                             si = audits['speed-index'].get('numericValue')
@@ -1861,7 +1946,8 @@ class WebCrawler:
                             'success': True,
                             'performance_score': performance_score,
                             'metrics': metrics,
-                            'strategy': strategy
+                            'strategy': strategy,
+                            'source': 'lighthouse_lab'
                         }
 
                     elif response.status_code == 429:
