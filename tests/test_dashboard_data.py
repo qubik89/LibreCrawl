@@ -71,6 +71,21 @@ class DashboardDataTest(unittest.TestCase):
         self.assertEqual(dashboard_data._issue_presentation('SEO', 'Missing Canonical URL', 'warning')['priority'], 'medium')
         self.assertEqual(dashboard_data._issue_presentation('Structured Data', 'No Structured Data', 'info')['priority'], 'opportunity')
 
+    def test_empty_aggregate_recovers_from_clickhouse_row_reader(self):
+        empty_aggregate = {'coverage': {'unique_urls': 0}}
+        url_page = {'rows': self.urls}
+        with mock.patch.object(dashboard_data.crawl_clickhouse, 'get_dashboard_facts', return_value=empty_aggregate):
+            with mock.patch.object(dashboard_data.crawl_clickhouse, 'load_urls', return_value=url_page):
+                with mock.patch.object(dashboard_data.crawl_clickhouse, 'load_links', return_value={'rows': []}):
+                    with mock.patch.object(dashboard_data.crawl_clickhouse, 'load_issues', return_value={'rows': self.issues}):
+                        with mock.patch.object(dashboard_data.crawl_db, 'get_crawl_by_id', return_value={'base_url': 'https://example.test'}):
+                            with mock.patch.object(dashboard_data.crawl_db, 'load_crawl_enrichments', return_value={}):
+                                facts = dashboard_data.build_dashboard_snapshot(7)
+
+        self.assertEqual(facts['source'], 'clickhouse_rows')
+        self.assertEqual(facts['coverage']['internal_urls'], 3)
+        self.assertEqual(facts['http']['4xx'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

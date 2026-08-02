@@ -25,10 +25,11 @@ def build_dashboard_snapshot(crawl_id, exclusion_patterns=None):
     """Return an evidence-only dashboard projection for one crawl."""
     exclusion_patterns = [pattern for pattern in (exclusion_patterns or []) if pattern]
     aggregate_facts = crawl_clickhouse.get_dashboard_facts(crawl_id, exclusion_patterns)
-    if aggregate_facts:
+    if _has_url_evidence(aggregate_facts):
         facts = _facts_from_aggregates(aggregate_facts)
     else:
-        facts = _facts_from_database(crawl_id, exclusion_patterns)
+        clickhouse_rows = _facts_from_clickhouse_rows(crawl_id, exclusion_patterns)
+        facts = clickhouse_rows or _facts_from_database(crawl_id, exclusion_patterns)
 
     crawl = crawl_db.get_crawl_by_id(crawl_id) or {}
     facts['schema_version'] = 'dashboard.v1'
@@ -43,6 +44,55 @@ def build_dashboard_snapshot(crawl_id, exclusion_patterns=None):
     }
     facts['enrichments'] = _safe_enrichments(crawl_db.load_crawl_enrichments(crawl_id))
     return facts
+
+
+def _has_url_evidence(facts):
+    coverage = (facts or {}).get('coverage') or {}
+    return _number(coverage.get('unique_urls')) > 0
+
+
+def _facts_from_clickhouse_rows(crawl_id, exclusion_patterns):
+    """Recover from an aggregate-query mismatch using the proven row readers.
+
+    The paged readers power the existing tables. Using them here prevents the
+    overview from showing an empty audit when a legacy ClickHouse build rejects
+    an aggregate expression but can still return crawl rows.
+    """
+    urls = _load_clickhouse_rows(crawl_clickhouse.load_urls, crawl_id)
+    if not urls:
+        return None
+    links = _load_clickhouse_rows(crawl_clickhouse.load_links, crawl_id)
+    issues = _load_clickhouse_rows(crawl_clickhouse.load_issues, crawl_id)
+    return _facts_from_rows(
+        _latest_by_key(urls, lambda row: normalise_url(row.get('url'))),
+        _latest_by_key(links, lambda row: '|'.join((
+            normalise_url(row.get('source_url')), normalise_url(row.get('target_url')),
+            str(row.get('anchor_text') or ''), str(row.get('placement') or 'body'),
+        ))),
+        _latest_by_key(issues, lambda row: '|'.join((
+            normalise_url(row.get('url')), str(row.get('category') or ''), str(row.get('issue') or ''),
+        ))),
+        exclusion_patterns,
+        source='clickhouse_rows',
+    )
+
+
+def _load_clickhouse_rows(loader, crawl_id, page_size=1000, max_pages=100):
+    rows = []
+    after = None
+    for _ in range(max_pages):
+        page = loader(crawl_id, limit=page_size, after=after)
+        if not page:
+            break
+        batch = page.get('rows') or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        next_after = batch[-1].get('_row_order')
+        if next_after in (None, after):
+            break
+        after = next_after
+    return rows
 
 
 def _facts_from_database(crawl_id, exclusion_patterns):

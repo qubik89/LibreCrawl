@@ -491,7 +491,7 @@ def get_dashboard_facts(crawl_id, exclusion_patterns=None):
     issues_table = _table('crawl_issues')
     latest_urls = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS url,
+            url,
             argMax(status_code, row_order) AS status_code,
             argMax(error_type, row_order) AS error_type,
             argMax(content_type, row_order) AS content_type,
@@ -501,29 +501,25 @@ def get_dashboard_facts(crawl_id, exclusion_patterns=None):
             argMax(row_json, row_order) AS row_json
         FROM {urls_table}
         WHERE crawl_id = {crawl_id}
-        GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url)
+        GROUP BY url
     '''
     latest_issues = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS url, category, issue,
+            url, category, issue,
             argMax(type, row_order) AS type
         FROM {issues_table}
         WHERE crawl_id = {crawl_id}
-        GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url), category, issue
+        GROUP BY url, category, issue
     '''
     latest_links = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'source_final_url'), ''), source_url) AS source_url,
-            coalesce(nullIf(JSONExtractString(row_json, 'target_final_url'), ''), target_url) AS target_url,
+            source_url, target_url,
             anchor_text, placement,
             argMax(is_internal, row_order) AS is_internal,
             argMax(target_status, row_order) AS target_status
         FROM {links_table}
         WHERE crawl_id = {crawl_id}
-        GROUP BY
-            coalesce(nullIf(JSONExtractString(row_json, 'source_final_url'), ''), source_url),
-            coalesce(nullIf(JSONExtractString(row_json, 'target_final_url'), ''), target_url),
-            anchor_text, placement
+        GROUP BY source_url, target_url, anchor_text, placement
     '''
     issue_exclusions = _dashboard_exclusion_conditions(exclusion_patterns or [])
     try:
