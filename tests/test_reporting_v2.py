@@ -83,6 +83,29 @@ class ReportingV2Test(unittest.TestCase):
         self.assertTrue(all('Crawl' not in item and 'Rows are' not in item for item in view['limitations']))
         self.assertIn('indexación en Google', view['limitations'][1])
 
+    def test_spanish_report_collapses_semantically_duplicate_limitations(self):
+        view = reporting_pdf.build_report_suite_view_model(
+            {'report_type': 'executive', 'language': 'es-ES'},
+            {
+                'limitations': [
+                    'El tiempo de respuesta corresponde a crawl_request_duration, no a una Core Web Vital.',
+                    'La deduplicación usa argMax(row_order) por URL/issue/enlace.',
+                ],
+            },
+            {
+                'crawl': {'base_domain': 'example.test'},
+                'coverage': {'denominators': {}},
+                'limitations': [
+                    'Rows are de-duplicated with the most recent stored crawler record for each logical key.',
+                    'Crawl request duration is not a Core Web Vital or user-field performance metric.',
+                ],
+            }, {},
+        )
+
+        self.assertEqual(len(view['limitations']), 2)
+        self.assertNotIn('argMax', ' '.join(view['limitations']))
+        self.assertNotIn('crawl_request_duration', ' '.join(view['limitations']))
+
     def test_executive_print_hides_flowing_footer_and_uses_closing_heading(self):
         facts = {
             'crawl': {'base_domain': 'example.test'},

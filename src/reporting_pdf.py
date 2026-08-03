@@ -552,6 +552,7 @@ def _display_limitations(limitations, language):
             'Este rastreo no conservó la pertenencia al sitemap ni su solapamiento con las URLs rastreadas; no se extraen conclusiones sobre el sitemap.',
     }
     rendered = []
+    categories = set()
     for item in limitations:
         text = str(item or '').strip()
         if not text:
@@ -563,8 +564,21 @@ def _display_limitations(limitations, language):
             )
         else:
             text = translations.get(text, text)
+        folded = text.casefold()
+        category = None
+        if 'deduplic' in folded and ('clave lógica' in folded or 'argmax(row_order)' in folded):
+            category = 'deduplication'
+        elif 'core web vital' in folded and (
+            'duración de la petición' in folded or 'tiempo de respuesta' in folded
+            or 'crawl_request_duration' in folded
+        ):
+            category = 'crawl-performance'
+        if category and category in categories:
+            continue
         if text not in rendered:
             rendered.append(text)
+            if category:
+                categories.add(category)
     return rendered
 
 
