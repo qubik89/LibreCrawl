@@ -109,6 +109,26 @@ class ReportingApiHelperTest(unittest.TestCase):
         fallback = main.public_report_settings({'primary_color': 'url(javascript:bad)'})
         self.assertEqual(fallback['appearance']['primary_color'], '#1d4ed8')
 
+    def test_get_report_settings_loads_the_authenticated_profile(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin'})
+        main.request.path = '/api/report-settings'
+        reporting_settings = types.SimpleNamespace(
+            get_report_asset=mock.Mock(return_value=None),
+        )
+        profile = {
+            'openrouter_api_key': 'sk-live-1234567890',
+            'default_model': 'openai/gpt-4.1',
+        }
+
+        with mock.patch.object(main, '_get_report_profile', return_value=profile):
+            with mock.patch.dict(sys.modules, {'src.reporting_settings': reporting_settings}):
+                response = main.get_report_settings()
+
+        self.assertTrue(response['success'])
+        self.assertTrue(response['settings']['has_openrouter_api_key'])
+        self.assertEqual(response['settings']['masked_openrouter_api_key'], 'sk-l...7890')
+        reporting_settings.get_report_asset.assert_called_once_with(None, 5)
+
     def test_login_required_rejects_stale_user_session_for_api(self):
         main.session.update({'user_id': 999, 'username': 'stale', 'tier': 'admin'})
         main.request.path = '/api/start_crawl'

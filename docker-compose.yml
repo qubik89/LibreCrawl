@@ -22,6 +22,8 @@ services:
       - DISABLE_GUEST=${DISABLE_GUEST:-false}
       # Set to "true" for demo mode (1.5GB per-user memory limit)
       - DEMO_MODE=${DEMO_MODE:-false}
+      # Explicit opt-in for the V2 report generation workflow.
+      - REPORTS_V2_ENABLED=${REPORTS_V2_ENABLED:-false}
       # DANGEROUS: Set to "true" to allow login as any username with no password
       # (username only used to separate sessions). Do NOT use in production.
       - DANGEROUSLY_SKIP_AUTH=${DANGEROUSLY_SKIP_AUTH:-false}

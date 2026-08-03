@@ -942,6 +942,10 @@ body {
     line-height: 1.4;
 }
 
+.setting-help.is-error {
+    color: #fca5a5;
+}
+
 /* Checkbox Styles */
 .checkbox-label {
     display: flex !important;

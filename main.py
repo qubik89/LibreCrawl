@@ -1665,6 +1665,7 @@ def get_report_settings():
     if not current_user_can_use_reports():
         return report_feature_forbidden()
     try:
+        from src.reporting_settings import get_report_asset
 
         user_id = session.get('user_id')
         profile = _get_report_profile(user_id)

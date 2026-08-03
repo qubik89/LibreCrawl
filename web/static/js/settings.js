@@ -268,6 +268,7 @@ let defaultSettings = {
 let reportSettings = {};
 let reportModels = [];
 let currentSettingsTier = 'guest';
+let reportSettingsLoadError = '';
 const defaultReportSettings = {
     default_model: 'anthropic/claude-opus-4.7',
     manual_model: '',
@@ -741,12 +742,16 @@ async function loadReportSettings() {
     try {
         const response = await fetch('/api/report-settings');
         const data = await response.json();
-        if (data.success) {
-            reportSettings = { ...defaultReportSettings, ...data.settings };
-            populateReportSettingsForm();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'No se pudieron cargar los ajustes de informes');
         }
+        reportSettings = { ...defaultReportSettings, ...data.settings };
+        reportSettingsLoadError = '';
+        populateReportSettingsForm();
     } catch (error) {
         console.warn('Failed to load report settings:', error);
+        reportSettingsLoadError = error.message || 'No se pudieron cargar los ajustes de informes';
+        reportNotice(reportSettingsLoadError, 'error');
     }
     return reportSettings;
 }
@@ -778,15 +783,20 @@ function populateReportSettingsForm() {
     if (!keyInput) return;
 
     keyInput.value = '';
-    keyInput.placeholder = reportSettings.has_openrouter_api_key
-        ? `Saved: ${reportSettings.masked_openrouter_api_key}`
+    keyInput.placeholder = reportSettingsLoadError
+        ? 'No se pudo comprobar la clave guardada'
+        : reportSettings.has_openrouter_api_key
+        ? `Guardada: ${reportSettings.masked_openrouter_api_key}`
         : 'Pega la clave API de OpenRouter';
 
     const keyStatus = document.getElementById('reportOpenRouterKeyStatus');
     if (keyStatus) {
-        keyStatus.textContent = reportSettings.has_openrouter_api_key
-            ? `Saved key: ${reportSettings.masked_openrouter_api_key}`
+        keyStatus.textContent = reportSettingsLoadError
+            ? 'No se pudieron cargar los ajustes. Inténtalo de nuevo.'
+            : reportSettings.has_openrouter_api_key
+            ? `Clave guardada: ${reportSettings.masked_openrouter_api_key}`
             : 'No hay clave guardada';
+        keyStatus.classList.toggle('is-error', Boolean(reportSettingsLoadError));
     }
 
     populateReportModelSelect('reportModelSelect', reportSettings.default_model);
