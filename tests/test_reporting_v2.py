@@ -107,6 +107,32 @@ class ReportingV2Test(unittest.TestCase):
         self.assertNotIn('argMax', ' '.join(view['limitations']))
         self.assertNotIn('crawl_request_duration', ' '.join(view['limitations']))
 
+    def test_spanish_report_hides_internal_summary_notes_and_collapses_source_duplicates(self):
+        view = reporting_pdf.build_report_suite_view_model(
+            {'report_type': 'executive', 'language': 'es-ES'},
+            {
+                'limitations': [
+                    'El paquete es agregado (aggregate_only=true) y excluye filas de evidencia individuales.',
+                    'La evidencia de rastreo no establece indexación real en Google, tráfico, conversiones ni ingresos.',
+                    'El denominador de URLs descubiertas es inferior y requiere reconciliar ambos contadores.',
+                    'La pertenencia a sitemap no se persistió; no hay conclusión disponible.',
+                ],
+            },
+            {
+                'crawl': {'base_domain': 'example.test'},
+                'coverage': {'denominators': {}},
+                'limitations': [
+                    'Crawl evidence does not establish Google indexing, traffic, conversion, or revenue.',
+                    'The discovered URL denominator is lower than the final unique URL count; crawl coverage is not reported until both lifecycle counters are reconciled.',
+                    'Sitemap membership and sitemap/crawl overlap were not persisted for this crawl; no sitemap conclusion is available.',
+                ],
+            }, {},
+        )
+
+        rendered = ' '.join(view['limitations'])
+        self.assertEqual(len(view['limitations']), 3)
+        self.assertNotIn('aggregate_only', rendered)
+
     def test_executive_print_hides_flowing_footer_and_uses_closing_heading(self):
         facts = {
             'crawl': {'base_domain': 'example.test'},

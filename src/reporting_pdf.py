@@ -565,6 +565,10 @@ def _display_limitations(limitations, language):
         else:
             text = translations.get(text, text)
         folded = text.casefold()
+        if 'aggregate_only' in folded or (
+            'paquete' in folded and 'agregado' in folded and 'filas de evidencia' in folded
+        ):
+            continue
         category = None
         if 'deduplic' in folded and ('clave lógica' in folded or 'argmax(row_order)' in folded):
             category = 'deduplication'
@@ -573,6 +577,14 @@ def _display_limitations(limitations, language):
             or 'crawl_request_duration' in folded
         ):
             category = 'crawl-performance'
+        elif all(term in folded for term in ('indexación', 'tráfico', 'conversion', 'ingresos')):
+            category = 'external-outcomes'
+        elif 'urls descubiertas' in folded and ('inferior' in folded or 'reconcili' in folded):
+            category = 'discovery-coverage'
+        elif 'sitemap' in folded and (
+            'no se' in folded or 'no hay conclusión' in folded or 'no se extraen conclusiones' in folded
+        ):
+            category = 'sitemap-coverage'
         if category and category in categories:
             continue
         if text not in rendered:
