@@ -66,6 +66,37 @@ class ReportingV2Test(unittest.TestCase):
         self.assertEqual(view['crawl']['base_domain'], 'www.davidayala.com')
         self.assertEqual(view['crawl']['display_domain'], 'davidayala.com')
 
+    def test_spanish_report_localises_deterministic_limitations(self):
+        view = reporting_pdf.build_report_suite_view_model(
+            {'report_type': 'executive', 'language': 'es-ES'}, {},
+            {
+                'crawl': {'base_domain': 'example.test'},
+                'coverage': {'denominators': {}},
+                'limitations': [
+                    'Rows are de-duplicated with the most recent stored crawler record for each logical key.',
+                    'Crawl evidence does not establish Google indexing, traffic, conversion, or revenue.',
+                ],
+            }, {},
+        )
+
+        self.assertEqual(len(view['limitations']), 2)
+        self.assertTrue(all('Crawl' not in item and 'Rows are' not in item for item in view['limitations']))
+        self.assertIn('indexación en Google', view['limitations'][1])
+
+    def test_executive_print_hides_flowing_footer_and_uses_closing_heading(self):
+        facts = {
+            'crawl': {'base_domain': 'example.test'},
+            'coverage': {'denominators': {}},
+            'evidence': {},
+        }
+        analysis = reporting_documents.fallback_analysis(facts, 'es-ES')
+        document = reporting_documents.normalise_document(None, facts, analysis, 'executive', 'es-ES')
+
+        html = reporting_pdf.render_report_document_html(document, analysis, facts)
+
+        self.assertIn('.report-footer { display: none; }', html)
+        self.assertIn('Conclusiones y límites', html)
+
     def test_historical_comparison_is_rendered_without_exposing_baseline_id(self):
         view = reporting_pdf.build_report_suite_view_model(
             {'report_type': 'executive', 'language': 'es-ES'}, {},

@@ -187,6 +187,7 @@
       .cover { min-height: 247mm; }
       .section { padding-left: 0; padding-right: 0; }
       .finding, .action, .chart, .coverage, .scorecard tr, .evidence-table tr, .horizon { break-inside: avoid; }
+      .report-footer { display: none; }
       thead { display: table-header-group; }
     }
   </style>
@@ -429,7 +430,7 @@
   {% endif %}
 
     <section class="section {% if report.report_type != 'executive' %}page{% endif %}" id="closing">
-    {{ section_head('09' if report.report_type != 'technical' else 'I', report['copy'].decision, report.title, report.closing) }}
+    {{ section_head('09' if report.report_type != 'technical' else 'I', report['copy'].closing, report['copy'].closing, report.closing) }}
     {% if report.brand.cta %}<p class="report-cta"><strong>{{ 'Next step' if report.language == 'en' else 'Siguiente paso' }}</strong> {{ report.brand.cta }}</p>{% endif %}
     {% if report.report_type == 'executive' %}<ul class="limits" data-module="limitations"><li><span aria-hidden="true">—</span><span>{{ report['copy'].claim_limit }}</span></li>{% for limit in report.limitations|unique %}<li><span aria-hidden="true">—</span><span>{{ limit }}</span></li>{% endfor %}</ul>{% endif %}
     <div class="report-footer"><span>{{ report.brand.name or report.crawl.display_domain }} · {{ report['copy'].product_label }}</span><span>{{ report.brand.author }}{% if report.brand.contact %} · {{ report.brand.contact }}{% endif %}{% if report.brand.footer_text %} · {{ report.brand.footer_text }}{% endif %}</span></div>

@@ -157,7 +157,10 @@ def build_report_suite_view_model(document, analysis, audit_facts, branding=None
         'closing': document.get('closing'),
         'crawl': crawl,
         'coverage': coverage,
-        'limitations': list(facts.get('limitations') or []) + list(analysis.get('limitations') or []),
+        'limitations': _display_limitations(
+            list(facts.get('limitations') or []) + list(analysis.get('limitations') or []),
+            language,
+        ),
         'stats': _suite_cover_stats(report_type, denominators, thematic, coverage, labels, language),
         'coverage_rows': _suite_coverage_rows(denominators, language),
         'comparison_rows': _suite_comparison_rows(facts.get('comparison') or {}, language),
@@ -461,7 +464,8 @@ def _suite_product_copy(language, report_type, commercial_context):
         return {
             'product_label': label, 'audience': audience, 'purpose': purpose,
             'context_label': 'Existing client' if commercial_context == 'existing_client' else 'Prospect',
-            'contents': 'Contents', 'decision': 'Decision brief', 'coverage': 'Evidence coverage',
+            'contents': 'Contents', 'decision': 'Decision brief', 'closing': 'Conclusions and limits',
+            'coverage': 'Evidence coverage',
             'scorecard': 'Transparent thematic scorecard', 'distributions': 'Observed distributions',
             'findings': 'Evidence-led findings', 'actions': 'Prioritised action backlog',
             'plan': 'Impact, effort, and sequence', 'method': 'Method, sources, and limits',
@@ -482,7 +486,8 @@ def _suite_product_copy(language, report_type, commercial_context):
     return {
         'product_label': label, 'audience': audience, 'purpose': purpose,
         'context_label': 'Cliente actual' if commercial_context == 'existing_client' else 'Prospecto',
-        'contents': 'Contenido', 'decision': 'Resumen de decisión', 'coverage': 'Cobertura de la evidencia',
+        'contents': 'Contenido', 'decision': 'Resumen de decisión', 'closing': 'Conclusiones y límites',
+        'coverage': 'Cobertura de la evidencia',
         'scorecard': 'Cuadro temático transparente', 'distributions': 'Distribuciones observadas',
         'findings': 'Hallazgos basados en evidencia', 'actions': 'Backlog priorizado de acciones',
         'plan': 'Impacto, esfuerzo y secuencia', 'method': 'Método, fuentes y límites',
@@ -525,6 +530,42 @@ def _suite_cover_stats(report_type, denominators, thematic, coverage, labels, la
             'value': f'{_format_number(indexable, language)} / {_format_number(html_2xx, language)}',
         },
     ]
+
+
+def _display_limitations(limitations, language):
+    """Localise deterministic data caveats without rewriting model-authored copy."""
+    if language == 'en':
+        return list(dict.fromkeys(str(item) for item in limitations if item))
+
+    translations = {
+        'Rows are de-duplicated with the most recent stored crawler record for each logical key.':
+            'Las filas se deduplican conservando el registro más reciente del rastreador para cada clave lógica.',
+        'Crawl request duration is not a Core Web Vital or user-field performance metric.':
+            'La duración de la petición durante el rastreo no es una Core Web Vital ni una métrica de rendimiento de usuarios reales.',
+        'Crawl request duration is not a Core Web Vital or a user-field performance metric.':
+            'La duración de la petición durante el rastreo no es una Core Web Vital ni una métrica de rendimiento de usuarios reales.',
+        'Crawl evidence does not establish Google indexing, traffic, conversion, or revenue.':
+            'La evidencia del rastreo no demuestra indexación en Google, tráfico, conversiones ni ingresos.',
+        'The discovered URL denominator is lower than the final unique URL count; crawl coverage is not reported until both lifecycle counters are reconciled.':
+            'El total de URLs descubiertas es inferior al recuento final de URLs únicas; la cobertura no se muestra hasta reconciliar ambos contadores.',
+        'Sitemap membership and sitemap/crawl overlap were not persisted for this crawl; no sitemap conclusion is available.':
+            'Este rastreo no conservó la pertenencia al sitemap ni su solapamiento con las URLs rastreadas; no se extraen conclusiones sobre el sitemap.',
+    }
+    rendered = []
+    for item in limitations:
+        text = str(item or '').strip()
+        if not text:
+            continue
+        if text.startswith('Fallback evidence from ') and ' is capped at ' in text:
+            text = (
+                'La evidencia de respaldo está limitada por entidad; no debe extrapolarse '
+                'más allá de las filas cubiertas.'
+            )
+        else:
+            text = translations.get(text, text)
+        if text not in rendered:
+            rendered.append(text)
+    return rendered
 
 
 def _suite_coverage_rows(denominators, language):
