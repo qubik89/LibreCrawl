@@ -110,7 +110,7 @@ def generate_report_analysis(client, model, audit_facts, prompt_bundle, model_me
     """Generate the V2 evidence analysis as a JSON object response."""
     messages = [
         {'role': 'system', 'content': _system_prompt(prompt_bundle, 'audit_analysis_system_prompt')},
-        {'role': 'user', 'content': 'AuditFactsV2 JSON:\n' + _json_text(_model_facts(audit_facts))},
+        {'role': 'user', 'content': 'Aggregate AuditSummaryV2 JSON (no evidence rows):\n' + _json_text(_model_facts(audit_facts))},
     ]
     return _generate_structured(client, model, messages, model_metadata, {
         'max_tokens': 48000,
@@ -131,7 +131,7 @@ def generate_report_document(client, model, audit_facts, analysis, prompt_bundle
                 f"Commercial context: {prompt_bundle.get('commercial_context')}\n"
                 'Client context JSON:\n' + _json_text(client_context or {}) + '\n\n'
                 'Validated analysis JSON:\n' + _json_text(analysis) + '\n\n'
-                'AuditFactsV2 JSON:\n' + _json_text(_model_facts(audit_facts))
+                'Aggregate AuditSummaryV2 JSON (no evidence rows):\n' + _json_text(_model_facts(audit_facts))
             ),
         },
     ]
@@ -159,7 +159,7 @@ def generate_report_quality_review(client, model, audit_facts, analysis, documen
                 'Deterministic review JSON:\n' + _json_text(deterministic_review or {}) + '\n\n'
                 'Analysis JSON:\n' + _json_text(analysis) + '\n\n'
                 'Document JSON:\n' + _json_text(document) + '\n\n'
-                'AuditFactsV2 JSON:\n' + _json_text(_model_facts(audit_facts))
+                'Aggregate AuditSummaryV2 JSON (no evidence rows):\n' + _json_text(_model_facts(audit_facts))
             ),
         },
     ]
@@ -184,7 +184,7 @@ def generate_report_repair(client, model, audit_facts, analysis, document, quali
                 'Quality issues JSON:\n' + _json_text(quality_review) + '\n\n'
                 'Current analysis JSON:\n' + _json_text(analysis) + '\n\n'
                 'Current document JSON:\n' + _json_text(document) + '\n\n'
-                'Immutable AuditFactsV2 JSON:\n' + _json_text(_model_facts(audit_facts))
+                'Immutable aggregate AuditSummaryV2 JSON (no evidence rows):\n' + _json_text(_model_facts(audit_facts))
             ),
         },
     ]
@@ -336,7 +336,7 @@ def _analysis_schema():
         'observation': {'type': 'string'}, 'inference': {'type': 'string'},
         'hypothesis': {'type': 'string'}, 'scope': {'type': 'string'},
         'numerator': _nullable('integer'), 'denominator': _nullable('integer'),
-        'metric_id': {'type': 'string'}, 'evidence_ids': _string_array(),
+        'metric_id': {'type': 'string'},
         'limitation': {'type': 'string'}, 'recommendation_ids': _string_array(),
     })
     recommendation = _strict_object({

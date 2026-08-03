@@ -1,11 +1,10 @@
 """Evidence-first data contracts for Report Suite 2.0.
 
-The report renderer and the LLM only consume this module's bounded, versioned
-snapshot.  It keeps raw crawler records out of prompts and makes every metric
-carry a clear denominator.
+The report renderer consumes the immutable evidence snapshot. Model stages use
+only a second, aggregate-only projection whose size is independent of crawl
+size and whose metrics carry explicit denominators.
 """
 
-import copy
 import hashlib
 import math
 from collections import Counter, defaultdict
@@ -18,19 +17,9 @@ AUDIT_FACTS_VERSION = '2.0'
 FALLBACK_SCAN_LIMIT = 5000
 DEFAULT_SAMPLE_LIMIT = 30
 DEFAULT_ISSUE_LIMIT = 60
-
-MODEL_URL_FIELDS = (
-    'id', 'url', 'requested_url', 'final_url', 'status_code', 'error_type',
-    'content_type', 'size', 'is_internal', 'depth', 'title', 'meta_description',
-    'h1', 'h2', 'h3', 'word_count', 'canonical_url', 'lang', 'robots',
-    'in_sitemap', 'response_time', 'response_time_ms', 'internal_links',
-    'external_links', 'javascript_rendered', 'redirect_chain', 'hreflang',
-)
-MODEL_LINK_FIELDS = (
-    'id', 'source_url', 'source_final_url', 'target_url', 'target_final_url',
-    'anchor_text', 'placement', 'is_internal', 'target_status', 'target_domain',
-)
-MODEL_ISSUE_FIELDS = ('id', 'url', 'final_url', 'category', 'issue', 'type', 'details')
+MODEL_DISTRIBUTION_LIMITS = {'issue_groups': 40, 'status_codes': 20, 'depth': 20}
+MODEL_ENRICHMENT_KEY_LIMIT = 30
+MODEL_ENRICHMENT_NUMERIC_FIELD_LIMIT = 20
 
 
 def build_audit_facts(crawl_id, crawl_metadata=None, baseline_crawl_id=None, enrichments=None,
@@ -96,68 +85,123 @@ def build_audit_facts(crawl_id, crawl_metadata=None, baseline_crawl_id=None, enr
 
 
 def model_audit_facts(facts):
-    """Return a semantically complete, prompt-safe projection of AuditFactsV2.
+    """Return the bounded aggregate summary used by every model stage.
 
-    The immutable artifact retains every crawler field. Model stages receive
-    the same metrics and samples without bulky HTML-adjacent payloads such as
-    full image arrays, raw social tags, or complete JSON-LD documents.
+    Full URL, link, and issue samples remain in the immutable local artifact so
+    deterministic appendices can still be rendered. They are deliberately not
+    copied into prompts. Prompt size therefore depends on metric families, not
+    on the number of crawled URLs or stored findings.
     """
-    projected = copy.deepcopy(facts or {})
-    evidence = projected.get('evidence') or {}
-    evidence['urls'] = [_model_url_evidence(row) for row in evidence.get('urls') or []]
-    evidence['links'] = [_pick_fields(row, MODEL_LINK_FIELDS) for row in evidence.get('links') or []]
-    evidence['issues'] = [_pick_fields(row, MODEL_ISSUE_FIELDS) for row in evidence.get('issues') or []]
-    projected['evidence'] = evidence
+    facts = facts or {}
+    evidence = facts.get('evidence') or {}
+    raw_distributions = facts.get('distributions') or {}
+    distributions = {}
+    distribution_scope = {}
+    for group, limit in MODEL_DISTRIBUTION_LIMITS.items():
+        rows = raw_distributions.get(group) or []
+        selected = sorted(
+            (row for row in rows if isinstance(row, dict)),
+            key=lambda row: (-(_int(row.get('count')) or 0), _distribution_identity(row)),
+        )[:limit]
+        distributions[group] = [_model_distribution_row(group, row) for row in selected]
+        distribution_scope[group] = {'total': len(rows), 'included': len(selected)}
+
+    crawl = facts.get('crawl') or {}
+    projected = {
+        'schema_version': facts.get('schema_version'),
+        'summary_version': '2.2-aggregate-only',
+        'crawl': {
+            key: crawl.get(key) for key in (
+                'id', 'base_domain', 'final_domain', 'started_at', 'completed_at',
+            ) if crawl.get(key) not in (None, '')
+        },
+        'coverage': facts.get('coverage') or {},
+        'thematic_metrics': facts.get('thematic_metrics') or {},
+        'distributions': distributions,
+        'comparison': facts.get('comparison') or {},
+        'enrichments': _model_enrichments(facts.get('enrichments') or {}),
+        'limitations': list(facts.get('limitations') or [])[:20],
+        'summary_scope': {
+            'aggregate_only': True,
+            'excluded_evidence_rows': {
+                kind: len(rows or []) for kind, rows in sorted(evidence.items())
+            },
+            'distribution_rows': distribution_scope,
+        },
+    }
+    projected['metric_catalog'] = _build_metric_catalog(projected)
     return _jsonable(projected)
 
 
-def _model_url_evidence(row):
-    result = _pick_fields(row, MODEL_URL_FIELDS)
-    images = row.get('images') if isinstance(row.get('images'), list) else []
-    broken_images = row.get('broken_images') if isinstance(row.get('broken_images'), list) else []
-    if images or broken_images:
-        result['image_summary'] = {
-            'total': len(images),
-            'missing_alt': sum(not str(item.get('alt') or '').strip() for item in images if isinstance(item, dict)),
-            'broken': len(broken_images) + sum(
-                bool(item.get('broken')) or (_int(item.get('status_code')) or 0) >= 400
-                for item in images if isinstance(item, dict)
-            ),
+def _distribution_identity(row):
+    return '|'.join(str(row.get(key) or '') for key in ('category', 'issue', 'label', 'type'))
+
+
+def _model_distribution_row(group, row):
+    fields = {
+        'issue_groups': ('category', 'issue', 'type', 'count'),
+        'status_codes': ('label', 'error_type', 'count'),
+        'depth': ('label', 'count'),
+    }[group]
+    result = {}
+    for key in fields:
+        value = row.get(key)
+        if value in (None, ''):
+            continue
+        result[key] = str(value)[:200] if isinstance(value, str) else value
+    return result
+
+
+def _model_enrichments(enrichments):
+    result = {}
+    for key in ('gsc', 'ga4', 'crux', 'pagespeed'):
+        source = enrichments.get(key) if isinstance(enrichments, dict) else None
+        source = source if isinstance(source, dict) else {}
+        result[key] = {
+            'status': source.get('status') or 'not_connected',
+            'data_summary': _model_data_summary(source.get('data') or {}, depth=0),
         }
-    structured_types = sorted(_structured_data_types(row.get('json_ld'), row.get('schema_org')))
-    if structured_types:
-        result['structured_data_types'] = structured_types
-    result['open_graph_present'] = bool(row.get('og_tags'))
-    result['twitter_card_present'] = bool(row.get('twitter_tags'))
     return result
 
 
-def _pick_fields(row, fields):
-    if not isinstance(row, dict):
-        return {}
-    return {key: copy.deepcopy(row[key]) for key in fields if key in row and row[key] not in (None, '', [], {})}
-
-
-def _structured_data_types(*values):
-    result = set()
-
-    def visit(value):
-        if isinstance(value, dict):
-            type_value = value.get('@type') or value.get('itemtype') or value.get('type')
-            candidates = type_value if isinstance(type_value, list) else [type_value]
-            for candidate in candidates:
-                if candidate:
-                    result.add(str(candidate).rstrip('/').rsplit('/', 1)[-1])
-            for nested in value.values():
-                if isinstance(nested, (dict, list)):
-                    visit(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                visit(nested)
-
-    for value in values:
-        visit(value)
-    return result
+def _model_data_summary(value, depth):
+    if depth >= 3:
+        return {'present': bool(value)}
+    if isinstance(value, dict):
+        return {
+            str(key)[:100]: _model_data_summary(value[key], depth + 1)
+            for key in sorted(value, key=str)[:MODEL_ENRICHMENT_KEY_LIMIT]
+        }
+    if isinstance(value, list):
+        summary = {'count': len(value)}
+        numeric = {}
+        for row in value:
+            if not isinstance(row, dict):
+                continue
+            for key, item in row.items():
+                if isinstance(item, (int, float)) and not isinstance(item, bool):
+                    key = str(key)
+                    number = float(item)
+                    state = numeric.setdefault(key, {
+                        'count': 0, 'sum': 0.0, 'min': number, 'max': number,
+                    })
+                    state['count'] += 1
+                    state['sum'] += number
+                    state['min'] = min(state['min'], number)
+                    state['max'] = max(state['max'], number)
+        if numeric:
+            summary['numeric_fields'] = {
+                key[:100]: {
+                    'sum': round(state['sum'], 6),
+                    'min': state['min'], 'max': state['max'],
+                    'average': round(state['sum'] / state['count'], 6),
+                }
+                for key, state in sorted(numeric.items())[:MODEL_ENRICHMENT_NUMERIC_FIELD_LIMIT]
+            }
+        return summary
+    if isinstance(value, str):
+        return value[:200]
+    return value
 
 
 def normalise_url(url):

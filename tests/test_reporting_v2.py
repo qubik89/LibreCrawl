@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest import mock
 
@@ -289,34 +290,45 @@ class ReportingV2Test(unittest.TestCase):
         self.assertEqual(facts['evidence']['urls'][0]['id'], 'urls-1')
         self.assertEqual(facts['coverage']['coverage_ratio'], 60.0)
 
-    def test_model_facts_keep_seo_evidence_without_raw_page_payloads(self):
+    def test_model_facts_are_aggregate_only_and_bounded_for_massive_crawls(self):
         facts = {
             'schema_version': '2.0',
-            'coverage': {'denominators': {'unique_urls': 1}},
-            'evidence': {'urls': [{
-                'id': 'urls-1', 'url': 'https://example.test/', 'status_code': 200,
-                'title': 'Home', 'canonical_url': 'https://example.test/',
-                'images': [{'src': f'https://cdn.test/{index}.jpg', 'alt': ''} for index in range(100)],
-                'json_ld': [{'@context': 'https://schema.org', '@type': 'Organization', 'name': 'Example'}],
-                'og_tags': {'og:title': 'Home', 'og:image': 'https://cdn.test/hero.jpg'},
-                'twitter_tags': {'twitter:card': 'summary_large_image'},
-                'meta_tags': {'robots': 'index,follow'},
-            }], 'links': [], 'issues': []},
+            'crawl': {'id': 42, 'base_domain': 'example.test'},
+            'coverage': {'denominators': {'unique_urls': 500000, 'unique_issues': 900000}},
+            'thematic_metrics': {'content': {'missing_title': 120000}},
+            'distributions': {
+                'status_codes': [{'label': '200', 'count': 480000}],
+                'depth': [{'label': str(index), 'count': 500000 - index} for index in range(100)],
+                'issue_groups': [
+                    {'category': 'SEO', 'issue': f'Problem {index}', 'type': 'warning', 'count': 1000 - index}
+                    for index in range(200)
+                ],
+            },
+            'evidence': {
+                'urls': [{'id': f'urls-{index}', 'url': f'https://example.test/{index}'} for index in range(1000)],
+                'links': [{'id': f'links-{index}', 'source_url': f'https://example.test/{index}'} for index in range(1000)],
+                'issues': [{'id': f'issues-{index}', 'url': f'https://example.test/{index}'} for index in range(1000)],
+            },
+            'enrichments': {
+                'gsc': {'status': 'available', 'data': {'rows': [{'query': f'query-{index}', 'clicks': index} for index in range(1000)]}},
+            },
             'limitations': [],
         }
 
         projected = reporting_v2.model_audit_facts(facts)
-        row = projected['evidence']['urls'][0]
+        payload = json.dumps(projected)
 
-        self.assertEqual(row['id'], 'urls-1')
-        self.assertEqual(row['canonical_url'], 'https://example.test/')
-        self.assertEqual(row['image_summary'], {'total': 100, 'missing_alt': 100, 'broken': 0})
-        self.assertEqual(row['structured_data_types'], ['Organization'])
-        self.assertTrue(row['open_graph_present'])
-        self.assertTrue(row['twitter_card_present'])
-        self.assertNotIn('images', row)
-        self.assertNotIn('json_ld', row)
-        self.assertNotIn('meta_tags', row)
+        self.assertNotIn('evidence', projected)
+        self.assertNotIn('https://example.test/999', payload)
+        self.assertNotIn('query-999', payload)
+        self.assertEqual(len(projected['distributions']['issue_groups']), 40)
+        self.assertEqual(len(projected['distributions']['depth']), 20)
+        self.assertEqual(projected['summary_scope']['excluded_evidence_rows'], {
+            'issues': 1000, 'links': 1000, 'urls': 1000,
+        })
+        self.assertEqual(projected['enrichments']['gsc']['data_summary']['rows']['count'], 1000)
+        self.assertLess(len(payload), 30000)
+        self.assertEqual(len(facts['evidence']['urls']), 1000)
 
     def test_inconsistent_discovery_denominator_is_declared_instead_of_showing_over_100_percent(self):
         source = {

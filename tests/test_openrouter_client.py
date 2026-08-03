@@ -190,13 +190,18 @@ class OpenRouterClientTest(unittest.TestCase):
         }
         metadata = {'supported_parameters': ['max_tokens', 'temperature', 'response_format']}
         bundle = get_prompt_bundle('es-ES', 'commercial', 'prospect')
-        facts = {'schema_version': '2.0', 'crawl': {'id': 4}}
+        facts = {
+            'schema_version': '2.0', 'crawl': {'id': 4},
+            'evidence': {'urls': [{'id': 'urls-1', 'url': 'https://private.example/page'}]},
+        }
 
         generate_report_analysis(client, 'anthropic/claude-opus-4.7', facts, bundle, metadata)
         _, messages, params = client.chat_completion.call_args.args
         self.assertEqual(params['response_format']['type'], 'json_schema')
         self.assertEqual(params['max_tokens'], 48000)
-        self.assertIn('AuditFactsV2', messages[1]['content'])
+        self.assertIn('AuditSummaryV2', messages[1]['content'])
+        self.assertIn('no evidence rows', messages[1]['content'])
+        self.assertNotIn('https://private.example/page', messages[1]['content'])
 
         client.reset_mock()
         client.chat_completion.return_value['choices'][0]['message']['content'] = (
@@ -232,7 +237,7 @@ class OpenRouterClientTest(unittest.TestCase):
         _, messages, params = client.chat_completion.call_args.args
         self.assertEqual(params['max_tokens'], 34000)
         self.assertEqual(params['temperature'], 0)
-        self.assertIn('Immutable AuditFactsV2 JSON', messages[1]['content'])
+        self.assertIn('Immutable aggregate AuditSummaryV2 JSON', messages[1]['content'])
 
     def test_v2_generation_uses_strict_schema_reasoning_and_provider_routing(self):
         client = mock.Mock()
