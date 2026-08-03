@@ -1034,7 +1034,7 @@ def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_a
     )
     model = options['model']
     model_metadata = get_openrouter_model(model)
-    client = OpenRouterClient(options['openrouter_api_key'])
+    client = OpenRouterClient(options['openrouter_api_key'], timeout=600)
     update_report_job(report_id, stage='analysis')
     analysis_usage = shared_analysis_usage
     analysis = copy.deepcopy(shared_analysis) if shared_analysis is not None else None
@@ -1158,7 +1158,7 @@ def run_report_pack(crawl_id, jobs):
             from src.reporting_prompts import get_prompt_bundle
             from src.reporting_settings import get_openrouter_model
 
-            client = OpenRouterClient(shared_options['openrouter_api_key'])
+            client = OpenRouterClient(shared_options['openrouter_api_key'], timeout=600)
             raw_analysis, analysis_usage = generate_report_analysis(
                 client, shared_options['model'], facts,
                 get_prompt_bundle(shared_options['language'], 'executive'),
@@ -1866,8 +1866,8 @@ def _report_cost_estimate(model, report_types, facts):
     repair_budgets = {'executive': 24000, 'commercial': 34000, 'technical': 56000}
     model_facts = model_audit_facts(facts or {})
     facts_tokens = max(1, len(json.dumps(model_facts, ensure_ascii=False)) // 4)
-    normal_output = 18000 + sum(writer_budgets.get(item, 18000) + 12000 for item in types)
-    maximum_output = int(18000 * 2.5) + sum(int(
+    normal_output = 48000 + sum(writer_budgets.get(item, 18000) + 12000 for item in types)
+    maximum_output = 112000 + sum(int(
         (writer_budgets.get(item, 18000) + 12000 + repair_budgets.get(item, 24000) + 12000) * 2.5
     ) for item in types)
     normal_calls = 1 + (len(types) * 2)

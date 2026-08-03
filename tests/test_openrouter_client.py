@@ -195,7 +195,7 @@ class OpenRouterClientTest(unittest.TestCase):
         generate_report_analysis(client, 'anthropic/claude-opus-4.7', facts, bundle, metadata)
         _, messages, params = client.chat_completion.call_args.args
         self.assertEqual(params['response_format']['type'], 'json_schema')
-        self.assertEqual(params['max_tokens'], 18000)
+        self.assertEqual(params['max_tokens'], 48000)
         self.assertIn('AuditFactsV2', messages[1]['content'])
 
         client.reset_mock()
@@ -263,6 +263,7 @@ class OpenRouterClientTest(unittest.TestCase):
         self.assertTrue(params['response_format']['json_schema']['strict'])
         self.assertEqual(params['response_format']['json_schema']['name'], 'seo_audit_analysis')
         self.assertEqual(params['provider'], {'require_parameters': True})
+        self.assertGreaterEqual(params['max_tokens'], 48000)
         self.assertGreater(params['max_tokens'], params['reasoning']['max_tokens'])
         self.assertEqual(usage['_response']['finish_reason'], 'stop')
         self.assertEqual(usage['_response']['id'], 'generation-1')

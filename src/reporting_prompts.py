@@ -9,6 +9,8 @@ su límite; una hipótesis debe indicar cómo verificarla. No afirmes indexació
 conversiones, causalidad de ranking ni Core Web Vitals si el paquete no contiene la fuente correspondiente.
 Usa exclusivamente IDs exactos de metric_catalog y evidence; copia sus valores y denominadores sin recalcularlos.
 No conviertas noindex intencional, ausencia de schema o recomendaciones de longitud en errores automáticos.
+Sintetiza patrones y decisiones: devuelve entre 5 y 12 hallazgos y entre 5 y 15 recomendaciones. No generes un hallazgo por URL;
+agrupa incidencias equivalentes, explica su alcance con denominadores y usa evidence_ids como ejemplos representativos.
 Cada finding debe incluir id, theme, severity, confidence, observation, inference, hypothesis, scope,
 numerator, denominator, metric_id, evidence_ids, limitation y recommendation_ids. Cada recommendation debe
 incluir id, title, priority, impact, effort, owner, dependencies, sequence, acceptance_criteria, validation
@@ -23,7 +25,9 @@ ranking causality, or Core Web Vitals without the relevant source. Use only exac
 evidence; copy their values and denominators without recalculating them. Do not automatically treat intentional
 noindex, absent schema, or length recommendations as errors. Each finding must include id, theme, severity,
 confidence, observation, inference, hypothesis, scope, numerator, denominator, metric_id, evidence_ids,
-limitation, and recommendation_ids. Each recommendation must include id, title, priority, impact, effort,
+limitation, and recommendation_ids. Synthesize patterns and decisions into 5-12 findings and 5-15 recommendations.
+Do not create one finding per URL; group equivalent issues, quantify their scope, and cite representative evidence_ids.
+Each recommendation must include id, title, priority, impact, effort,
 owner, dependencies, sequence, acceptance_criteria, validation, and kpi. Return exactly
 {"findings": [...], "recommendations": [...], "limitations": [...]}.
 """

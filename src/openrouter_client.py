@@ -113,9 +113,9 @@ def generate_report_analysis(client, model, audit_facts, prompt_bundle, model_me
         {'role': 'user', 'content': 'AuditFactsV2 JSON:\n' + _json_text(_model_facts(audit_facts))},
     ]
     return _generate_structured(client, model, messages, model_metadata, {
-        'max_tokens': 18000,
+        'max_tokens': 48000,
         'temperature': 0.1,
-        'reasoning': {'max_tokens': 6000, 'exclude': True},
+        'reasoning': {'max_tokens': 8000, 'exclude': True},
     }, 'seo_audit_analysis', _analysis_schema())
 
 

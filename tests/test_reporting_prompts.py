@@ -40,6 +40,12 @@ class ReportingPromptsTest(unittest.TestCase):
         self.assertIn('revisor independiente', bundle['quality_review_system_prompt'].lower())
         self.assertIn('una única reparación', bundle['repair_system_prompt'].lower())
 
+    def test_analysis_prompt_requires_pattern_synthesis_instead_of_one_finding_per_url(self):
+        bundle = get_prompt_bundle('es-ES', 'executive', 'existing_client')
+
+        self.assertIn('entre 5 y 12 hallazgos', bundle['audit_analysis_system_prompt'])
+        self.assertIn('No generes un hallazgo por URL', bundle['audit_analysis_system_prompt'])
+
     def test_get_prompt_bundle_falls_back_for_unknown_options(self):
         bundle = get_prompt_bundle('fr', 'casual')
 
