@@ -1,4 +1,5 @@
 """CPU-bound HTML analysis helpers for crawler worker processes."""
+import re
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -174,18 +175,27 @@ def _same_domain(domain, base_domain):
 def _detect_link_placement(link_element):
     current = link_element.parent
     while current and current.name:
+        # Theme classes on <body> often contain words like "menu" or
+        # "header"; they describe the document, not every descendant link.
+        if current.name in ('body', 'html'):
+            break
+
         if current.name == 'footer':
             return 'footer'
 
         classes = current.get('class', [])
         element_id = current.get('id', '')
-        classes_str = ' '.join(classes).lower() if classes else ''
+        placement_tokens = set()
+        for value in [*(classes or []), element_id]:
+            placement_tokens.update(
+                token for token in re.split(r'[^a-z0-9]+', str(value).lower()) if token
+            )
 
-        if 'footer' in classes_str or 'footer' in element_id.lower():
+        if 'footer' in placement_tokens:
             return 'footer'
         if current.name in ['nav', 'header']:
             return 'navigation'
-        if any(keyword in classes_str or keyword in element_id.lower() for keyword in ['nav', 'menu', 'header']):
+        if placement_tokens.intersection({'nav', 'navigation', 'menu', 'header'}):
             return 'navigation'
 
         current = current.parent

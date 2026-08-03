@@ -130,6 +130,31 @@ class CrawlClickHouseTest(unittest.TestCase):
         self.assertNotIn('OFFSET', select_sql)
         self.assertEqual(page['rows'][0]['_row_order'], '101')
 
+    def test_load_urls_for_urls_queries_graph_endpoints_and_deduplicates(self):
+        class GraphClient(FakeClickHouseClient):
+            def query(self, sql):
+                self.sql.append(sql)
+                return FakeQueryResult([
+                    (101, 'https://example.com/a', 200, 'text/html', 1, 0, 'A'),
+                    (102, 'https://example.com/a', 200, 'text/html', 1, 0, 'A duplicate'),
+                    (103, 'https://example.com/b', 200, 'text/html', 1, 1, 'B'),
+                ])
+
+        client = GraphClient()
+
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            page = crawl_clickhouse.load_urls_for_urls(
+                crawl_id=7,
+                urls=['https://example.com/a', 'https://example.com/a', 'https://example.com/b'],
+                limit=10,
+            )
+
+        self.assertIn("url IN ('https://example.com/a', 'https://example.com/b')", client.sql[-1])
+        self.assertEqual([row['url'] for row in page['rows']], [
+            'https://example.com/a',
+            'https://example.com/b',
+        ])
+
     def test_load_rows_preserves_uint64_cursor_precision_for_json_clients(self):
         first_order = 1785696868549154891
         client = FakeClickHouseClient(rows=[

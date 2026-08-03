@@ -765,6 +765,59 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
         print(f"Error loading crawled URLs: {e}")
         return []
 
+
+def load_crawled_urls_for_urls(crawl_id, urls, limit=500):
+    """Load crawled URL rows for a bounded set of graph endpoints."""
+    candidates = []
+    seen = set()
+    for value in urls or []:
+        value = str(value or '').strip()
+        if not value or len(value) > 4096 or any(ord(char) < 32 for char in value):
+            continue
+        if value not in seen:
+            seen.add(value)
+            candidates.append(value)
+        if len(candidates) >= 5000:
+            break
+
+    if not candidates:
+        return []
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            rows_by_url = {}
+            # Keep each IN clause below SQLite's variable limit.
+            for start in range(0, len(candidates), 400):
+                batch = candidates[start:start + 400]
+                placeholders = ','.join('?' for _ in batch)
+                cursor.execute(
+                    f'''SELECT * FROM crawled_urls
+                        WHERE crawl_id = ? AND url IN ({placeholders})
+                        ORDER BY id''',
+                    [crawl_id, *batch],
+                )
+                for row in cursor.fetchall():
+                    url_data = dict(row)
+                    url = str(url_data.get('url') or '').strip()
+                    if not url or url in rows_by_url:
+                        continue
+                    for field in ['h2', 'h3', 'meta_tags', 'og_tags', 'twitter_tags',
+                                  'json_ld', 'analytics', 'images', 'hreflang',
+                                  'schema_org', 'redirects', 'redirect_chain', 'linked_from']:
+                        if url_data.get(field):
+                            try:
+                                url_data[field] = json.loads(url_data[field])
+                            except Exception:
+                                url_data[field] = []
+                    rows_by_url[url] = url_data
+
+            return list(rows_by_url.values())[:max(0, min(int(limit), 5000))]
+    except Exception as e:
+        print(f"Error loading graph URL rows: {e}")
+        return []
+
+
 def load_crawl_links(crawl_id, limit=None, offset=0):
     """Load all links for a crawl"""
     try:

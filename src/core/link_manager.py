@@ -1,4 +1,5 @@
 """Link management and extraction"""
+import re
 import threading
 from urllib.parse import urljoin, urlparse
 from collections import deque
@@ -253,6 +254,11 @@ class LinkManager:
         current = link_element.parent
 
         while current and current.name:
+            # Theme classes on <body> often contain words like "menu" or
+            # "header"; they describe the document, not every descendant link.
+            if current.name in ('body', 'html'):
+                break
+
             # Check for footer
             if current.name == 'footer':
                 return 'footer'
@@ -260,9 +266,13 @@ class LinkManager:
             # Check for footer by class/id
             classes = current.get('class', [])
             element_id = current.get('id', '')
-            classes_str = ' '.join(classes).lower() if classes else ''
+            placement_tokens = set()
+            for value in [*(classes or []), element_id]:
+                placement_tokens.update(
+                    token for token in re.split(r'[^a-z0-9]+', str(value).lower()) if token
+                )
 
-            if 'footer' in classes_str or 'footer' in element_id.lower():
+            if 'footer' in placement_tokens:
                 return 'footer'
 
             # Check for navigation
@@ -270,8 +280,7 @@ class LinkManager:
                 return 'navigation'
 
             # Check for navigation by class/id
-            if any(keyword in classes_str or keyword in element_id.lower()
-                   for keyword in ['nav', 'menu', 'header']):
+            if placement_tokens.intersection({'nav', 'navigation', 'menu', 'header'}):
                 return 'navigation'
 
             current = current.parent

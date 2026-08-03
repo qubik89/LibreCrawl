@@ -250,8 +250,60 @@ class ReportingApiHelperTest(unittest.TestCase):
         self.assertEqual(response['visualized_pages'], 2)
         self.assertEqual(len(response['nodes']), 2)
         self.assertEqual(len(response['edges']), 1)
+        self.assertEqual(response['total_links'], 1)
+        self.assertEqual(response['visualized_links'], 1)
         sqlite_urls.assert_not_called()
         sqlite_links.assert_not_called()
+
+    def test_visualization_selects_pages_from_link_sample_for_large_crawl(self):
+        main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})
+        main.request.path = '/api/visualization_data'
+        crawl = {'id': 42, 'user_id': 5, 'session_id': 'session-a', 'base_url': 'https://example.test'}
+        first_url_page = [
+            {'url': f'https://example.test/page-{idx}', 'status_code': 200, 'title': '', 'depth': 1}
+            for idx in range(500)
+        ]
+        graph_pages = [
+            {'url': 'https://example.test/page-550', 'status_code': 200, 'title': 'Source', 'depth': 2},
+            {'url': 'https://example.test/page-551', 'status_code': 200, 'title': 'Target', 'depth': 3},
+        ]
+        links = [{
+            'source_url': 'https://example.test/page-550',
+            'target_url': 'https://example.test/page-551',
+            'is_internal': True,
+        }]
+
+        with mock.patch('src.crawl_db.get_crawl_by_id', return_value=crawl):
+            with mock.patch('src.crawl_clickhouse.load_urls', return_value={'rows': first_url_page, 'total': 600}):
+                with mock.patch('src.crawl_clickhouse.load_links', return_value={'rows': links, 'total': 1}):
+                    with mock.patch('src.crawl_clickhouse.load_urls_for_urls', return_value={'rows': graph_pages, 'total': 2}) as load_graph_urls:
+                        response = main.visualization_data()
+
+        self.assertTrue(response['success'])
+        self.assertEqual(len(response['nodes']), 2)
+        self.assertEqual(len(response['edges']), 1)
+        self.assertEqual(response['total_links'], 1)
+        load_graph_urls.assert_called_once()
+
+    def test_visualization_deduplicates_trailing_slashes_and_marks_actual_root(self):
+        nodes, edges = main._build_visualization_graph(
+            [
+                {'url': 'https://example.test/about/', 'status_code': 200},
+                {'url': 'https://example.test/', 'status_code': 200},
+                {'url': 'https://example.test/about', 'status_code': 200},
+            ],
+            [{
+                'source_url': 'https://example.test/',
+                'target_url': 'https://example.test/about',
+                'is_internal': True,
+            }],
+            base_url='https://example.test',
+        )
+
+        self.assertEqual(len(nodes), 2)
+        self.assertEqual(len(edges), 1)
+        self.assertEqual(nodes[0]['data']['url'], 'https://example.test/')
+        self.assertEqual(nodes[0]['data']['size'], 30)
 
     def test_visualization_falls_back_to_sqlite_per_collection(self):
         main.session.update({'user_id': 5, 'username': 'test', 'tier': 'admin', 'session_id': 'session-a', 'current_crawl_id': 42})

@@ -388,6 +388,63 @@ def load_urls(crawl_id, limit=500, offset=0, after=None, filters=None):
     return _query_json_rows('crawl_urls', crawl_id, limit, offset, after, filters)
 
 
+def load_urls_for_urls(crawl_id, urls, limit=500):
+    """Load URL rows for a bounded set of graph endpoints.
+
+    A graph sample must be selected from its links first. Paginating URL rows
+    and link rows independently can otherwise produce two valid but unrelated
+    samples, especially for large crawls.
+    """
+    client = get_client()
+    if not client:
+        return None
+
+    candidates = []
+    seen = set()
+    for value in urls or []:
+        value = str(value or '').strip()
+        if not value or len(value) > 4096 or any(ord(char) < 32 for char in value):
+            continue
+        if value not in seen:
+            seen.add(value)
+            candidates.append(value)
+        if len(candidates) >= 5000:
+            break
+
+    if not candidates:
+        return {'total': 0, 'rows': []}
+
+    url_values = ', '.join(_sql_text_literal(value) for value in candidates)
+    try:
+        result = client.query(f'''
+            SELECT row_order, url, status_code, content_type, is_internal, depth, title
+            FROM {_table('crawl_urls')}
+            WHERE crawl_id = {int(crawl_id)}
+              AND url IN ({url_values})
+            ORDER BY row_order ASC
+        ''')
+        rows_by_url = {}
+        for row_order, url, status_code, content_type, is_internal, depth, title in result.result_rows:
+            url = str(url or '').strip()
+            if not url or url in rows_by_url:
+                continue
+            rows_by_url[url] = {
+                'url': url,
+                'status_code': int(status_code or 0),
+                'content_type': content_type or '',
+                'is_internal': bool(is_internal),
+                'depth': int(depth or 0),
+                'title': title or '',
+                '_row_order': str(int(row_order)),
+            }
+
+        rows = list(rows_by_url.values())[:max(0, min(int(limit), 5000))]
+        return {'total': len(rows_by_url), 'rows': rows}
+    except Exception as e:
+        print(f'ClickHouse graph URL read failed for crawl {crawl_id}: {e}')
+        return None
+
+
 def load_links(crawl_id, limit=500, offset=0, after=None, filters=None):
     return _query_json_rows('crawl_links', crawl_id, limit, offset, after, filters)
 

@@ -50,6 +50,28 @@ class LinkManagerTests(unittest.TestCase):
 
         self.assertEqual([link['target_url'] for link in manager.all_links], ['https://example.com/body'])
 
+    def test_body_theme_menu_class_does_not_hide_content_links(self):
+        manager = LinkManager('example.com')
+        soup = BeautifulSoup(
+            '''
+            <body class="et_secondary_nav_only_menu et_divi_theme">
+                <main><article><a href="/body">Body</a></article></main>
+                <nav><a href="/nav">Nav</a></nav>
+                <footer><a href="/footer">Footer</a></footer>
+            </body>
+            ''',
+            'html.parser',
+        )
+
+        manager.collect_all_links(
+            soup,
+            'https://example.com/source',
+            {},
+            allowed_placements=['body'],
+        )
+
+        self.assertEqual([link['target_url'] for link in manager.all_links], ['https://example.com/body'])
+
     def test_collect_all_links_can_cap_links_per_page(self):
         manager = LinkManager('example.com')
         soup = BeautifulSoup(

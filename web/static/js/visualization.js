@@ -4,7 +4,7 @@
  */
 
 let cy = null;  // Cytoscape instance
-let graphData = { nodes: [], edges: [] };  // Current graph data
+let graphData = { nodes: [], edges: [], total_links: 0, visualized_links: 0 };  // Current graph data
 let currentLayout = 'cose';  // Current layout algorithm
 let currentFilter = 'all';  // Current filter
 
@@ -231,7 +231,13 @@ async function loadVisualizationData() {
 
         graphData = {
             nodes: data.nodes || [],
-            edges: data.edges || []
+            edges: data.edges || [],
+            total_links: Number.isFinite(Number(data.total_links))
+                ? Number(data.total_links)
+                : (data.edges || []).length,
+            visualized_links: Number.isFinite(Number(data.visualized_links))
+                ? Number(data.visualized_links)
+                : (data.edges || []).length,
         };
 
         if (graphData.nodes.length === 0) {
@@ -300,6 +306,12 @@ function updateGraph() {
     if (filteredNodes.length === 0) {
         cy.elements().remove();
         setVisualizationState('Sin resultados', 'No hay páginas que coincidan con este filtro.');
+        return;
+    }
+
+    if (graphData.total_links === 0) {
+        cy.elements().remove();
+        setVisualizationState('Sin relaciones guardadas', 'Este rastreo no guardó enlaces internos para visualizar.');
         return;
     }
 
@@ -444,7 +456,7 @@ function truncateUrl(url, maxLength = 60) {
  */
 function clearVisualization() {
     // Clear graph data
-    graphData = { nodes: [], edges: [] };
+    graphData = { nodes: [], edges: [], total_links: 0, visualized_links: 0 };
 
     // Clear the cytoscape graph if it exists
     if (cy) {
@@ -458,96 +470,142 @@ function clearVisualization() {
     console.log('Visualization cleared');
 }
 
+function visualizationUrlKey(url) {
+    const value = String(url || '').trim();
+    try {
+        const parsed = new URL(value);
+        let path = parsed.pathname || '/';
+        if (path !== '/') path = path.replace(/\/+$/, '') || '/';
+        return `${parsed.protocol.toLowerCase()}//${parsed.host.toLowerCase()}${path}${parsed.search}`;
+    } catch (_error) {
+        return value;
+    }
+}
+
+function buildLocalVisualizationGraph(urls, links, maxNodes = 500, maxLinks = 2000) {
+    const pagesByKey = new Map();
+    const pageOrder = [];
+    for (const page of urls || []) {
+        const url = String(page.url || '').trim();
+        const key = visualizationUrlKey(url);
+        if (!url || pagesByKey.has(key)) continue;
+        pagesByKey.set(key, page);
+        pageOrder.push(key);
+    }
+
+    const linkRows = [];
+    const linkKeys = new Set();
+    for (const link of links || []) {
+        if (!link.is_internal) continue;
+        const sourceKey = visualizationUrlKey(link.source_url);
+        const targetKey = visualizationUrlKey(link.target_url);
+        if (!sourceKey || !targetKey || sourceKey === targetKey) continue;
+        const edgeKey = `${sourceKey}->${targetKey}`;
+        if (linkKeys.has(edgeKey)) continue;
+        linkKeys.add(edgeKey);
+        linkRows.push([sourceKey, targetKey]);
+    }
+
+    const configuredRoot = window.crawlState && window.crawlState.baseUrl;
+    const firstDepthRoot = (urls || []).find(page => page && page.depth === 0 && page.url);
+    const rootKey = visualizationUrlKey(configuredRoot || (firstDepthRoot && firstDepthRoot.url));
+    const orderedKeys = pageOrder.slice();
+    if (pagesByKey.has(rootKey)) {
+        orderedKeys.splice(orderedKeys.indexOf(rootKey), 1);
+        orderedKeys.unshift(rootKey);
+    }
+
+    const selectedKeys = [];
+    const selectedSet = new Set();
+    const addPage = key => {
+        if (pagesByKey.has(key) && !selectedSet.has(key) && selectedKeys.length < maxNodes) {
+            selectedSet.add(key);
+            selectedKeys.push(key);
+        }
+    };
+    addPage(rootKey);
+    if (orderedKeys.length > maxNodes) {
+        for (const [sourceKey, targetKey] of linkRows) {
+            addPage(sourceKey);
+            addPage(targetKey);
+            if (selectedKeys.length >= maxNodes) break;
+        }
+    }
+    for (const key of orderedKeys) {
+        addPage(key);
+        if (selectedKeys.length >= maxNodes) break;
+    }
+
+    const nodes = [];
+    const nodeIds = new Map();
+    selectedKeys.forEach((key, idx) => {
+        const page = pagesByKey.get(key);
+        const url = String(page.url || '').trim();
+        const statusCode = Number(page.status_code || 0);
+        let color = '#6b7280';
+        if (statusCode >= 200 && statusCode < 300) color = '#10b981';
+        else if (statusCode >= 300 && statusCode < 400) color = '#3b82f6';
+        else if (statusCode >= 400 && statusCode < 500) color = '#f59e0b';
+        else if (statusCode >= 500 && statusCode < 600) color = '#ef4444';
+        const id = `node-${idx}`;
+        nodeIds.set(key, id);
+        nodes.push({
+            data: {
+                id,
+                label: url.split('/').pop() || url.split('//').pop() || url,
+                url,
+                status_code: statusCode,
+                title: page.title || '',
+                color,
+                size: rootKey && key === rootKey ? 30 : 20,
+                depth: page.depth || 0,
+            },
+        });
+    });
+
+    const edges = [];
+    for (const [sourceKey, targetKey] of linkRows) {
+        const source = nodeIds.get(sourceKey);
+        const target = nodeIds.get(targetKey);
+        if (!source || !target || source === target) continue;
+        edges.push({
+            data: {
+                id: `edge-${source}-${target}`,
+                source,
+                target,
+            },
+        });
+        if (edges.length >= maxLinks) break;
+    }
+
+    return { nodes, edges };
+}
+
 /**
  * Update visualization from loaded crawl data (not from backend)
  */
 function updateVisualizationFromLoadedData(urls, links) {
     if (!urls || urls.length === 0) {
-        graphData = { nodes: [], edges: [] };
+        graphData = { nodes: [], edges: [], total_links: 0, visualized_links: 0 };
         if (cy) cy.elements().remove();
-        setVisualizationState('Sin datos para visualizar', 'Inicia o carga un rastreo para ver sus relaciones.');
+        setVisualizationState('Sin datos para visualizar', 'Inicia un rastreo para visualizar la estructura del sitio.');
         console.log('No URL data to visualize');
         return;
     }
 
     console.log(`Building visualization from ${urls.length} URLs and ${links ? links.length : 0} links`);
-
-    // Build nodes from URLs
-    const nodes = [];
-    const url_to_id = {};
-    const max_nodes = 500;
-    const pages_to_visualize = urls.slice(0, max_nodes);
-
-    for (let idx = 0; idx < pages_to_visualize.length; idx++) {
-        const page = pages_to_visualize[idx];
-        const url = page.url || '';
-        const status_code = page.status_code || 0;
-
-        // Assign color based on status code
-        let color = '#6b7280';
-        if (status_code >= 200 && status_code < 300) color = '#10b981';
-        else if (status_code >= 300 && status_code < 400) color = '#3b82f6';
-        else if (status_code >= 400 && status_code < 500) color = '#f59e0b';
-        else if (status_code >= 500 && status_code < 600) color = '#ef4444';
-
-        const node = {
-            data: {
-                id: `node-${idx}`,
-                label: url.split('/').pop() || url.split('//').pop() || url,
-                url: url,
-                status_code: status_code,
-                title: page.title || '',
-                color: color,
-                size: idx === 0 ? 30 : 20,
-                depth: page.depth || 0
-            }
-        };
-        nodes.push(node);
-        url_to_id[url] = `node-${idx}`;
-    }
-
-    // Build edges from links
-    const edges = [];
-    const edges_set = new Set();
-
-    if (links && links.length > 0) {
-        for (const link of links) {
-            if (link.is_internal) {
-                const source_url = link.source_url || '';
-                const target_url = link.target_url || '';
-
-                const source_id = url_to_id[source_url];
-                const target_id = url_to_id[target_url];
-
-                if (source_id && target_id && source_id !== target_id) {
-                    const edge_key = `${source_id}-${target_id}`;
-                    if (!edges_set.has(edge_key)) {
-                        edges_set.add(edge_key);
-                        edges.push({
-                            data: {
-                                id: `edge-${edge_key}`,
-                                source: source_id,
-                                target: target_id
-                            }
-                        });
-                    }
-                }
-            }
-        }
-    }
-
+    const { nodes, edges } = buildLocalVisualizationGraph(urls, links);
     console.log(`Built ${nodes.length} nodes and ${edges.length} edges from loaded data`);
 
-    // Update global graph data
-    graphData = { nodes, edges };
+    graphData = {
+        nodes,
+        edges,
+        total_links: edges.length,
+        visualized_links: edges.length,
+    };
 
-    // Hide placeholder
     hideVisualizationState();
-
-    // If visualization is already initialized, update it
-    if (cy) {
-        updateGraph();
-    }
+    if (cy) updateGraph();
 }
 
 // Export functions to global scope

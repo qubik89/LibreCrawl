@@ -43,6 +43,31 @@ class HtmlAnalyzerTests(unittest.TestCase):
             ['https://example.com/body', 'https://example.com/nav'],
         )
 
+    def test_body_theme_menu_class_keeps_content_links_as_body(self):
+        html = b'''
+            <html>
+              <body class="et_secondary_nav_only_menu et_divi_theme">
+                <main><article><a href="/body">Body</a></article></main>
+                <nav><a href="/nav">Nav</a></nav>
+                <footer><a href="/footer">Footer</a></footer>
+              </body>
+            </html>
+        '''
+
+        analysis = analyze_html_content(
+            html,
+            'https://example.com/source',
+            1,
+            200,
+            'text/html',
+            True,
+            'example.com',
+            persist_links=True,
+            allowed_placements=['body'],
+        )
+
+        self.assertEqual([link['target_url'] for link in analysis['links']], ['https://example.com/body'])
+
 
 if __name__ == '__main__':
     unittest.main()

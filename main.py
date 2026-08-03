@@ -2319,21 +2319,27 @@ def crawl_status():
     return jsonify(payload)
 
 
-def _load_visualization_rows(crawl_id, url_limit=500, link_limit=2000):
+def _load_visualization_rows(crawl_id, url_limit=500, link_limit=2000, base_url=None):
     """Load the bounded graph input from the active result backend.
 
     Crawl results may live only in ClickHouse in production, while local
     installs can still use SQLite. Each collection falls back independently so
     a temporary failure in one ClickHouse table does not hide the other data.
     """
-    from src.crawl_db import get_crawl_counts, load_crawled_urls, load_crawl_links
+    from src.crawl_db import (
+        get_crawl_counts,
+        load_crawled_urls,
+        load_crawled_urls_for_urls,
+        load_crawl_links,
+    )
 
     crawled_pages = None
     all_links = None
     total_pages = None
+    total_links = None
 
     try:
-        from src.crawl_clickhouse import load_links, load_urls
+        from src.crawl_clickhouse import load_urls
 
         url_page = load_urls(crawl_id, limit=url_limit)
         if url_page is not None:
@@ -2345,9 +2351,14 @@ def _load_visualization_rows(crawl_id, url_limit=500, link_limit=2000):
     try:
         from src.crawl_clickhouse import load_links
 
-        link_page = load_links(crawl_id, limit=link_limit)
+        link_page = load_links(
+            crawl_id,
+            limit=link_limit,
+            filters={'scope': 'internal'},
+        )
         if link_page is not None:
             all_links = link_page.get('rows') or []
+            total_links = int(link_page.get('total') or len(all_links))
     except Exception as e:
         print(f"ClickHouse visualization links unavailable for crawl {crawl_id}: {e}")
 
@@ -2360,8 +2371,196 @@ def _load_visualization_rows(crawl_id, url_limit=500, link_limit=2000):
 
     if all_links is None:
         all_links = load_crawl_links(crawl_id, limit=link_limit)
+        total_links = None
 
-    return crawled_pages, all_links, total_pages
+    # ClickHouse already filtered this collection. Keep the SQLite fallback
+    # consistent so external references never become graph edges.
+    all_links = [link for link in all_links if link.get('is_internal')]
+    if total_links is None:
+        total_links = len(all_links)
+
+    # For large crawls, choose pages from the link sample instead of joining
+    # it to an unrelated first page of URL rows.
+    if all_links and (crawled_pages is None or (total_pages or 0) > url_limit):
+        endpoint_urls = _visualization_endpoint_urls(base_url, all_links)
+        graph_pages = None
+        try:
+            from src.crawl_clickhouse import load_urls_for_urls
+
+            graph_url_page = load_urls_for_urls(
+                crawl_id,
+                endpoint_urls,
+                limit=min(5000, max(url_limit, link_limit * 2 + 3)),
+            )
+            if graph_url_page is not None:
+                graph_pages = graph_url_page.get('rows') or []
+        except Exception as e:
+            print(f"ClickHouse graph URL lookup unavailable for crawl {crawl_id}: {e}")
+
+        if graph_pages is None:
+            graph_pages = load_crawled_urls_for_urls(
+                crawl_id,
+                endpoint_urls,
+                limit=min(5000, max(url_limit, link_limit * 2 + 3)),
+            )
+        if graph_pages:
+            crawled_pages = graph_pages
+
+    return crawled_pages, all_links, total_pages, total_links
+
+
+def _visualization_endpoint_urls(base_url, links, limit=5000):
+    """Return root and link endpoint URLs in stable insertion order."""
+    endpoint_urls = []
+    endpoint_seen = set()
+
+    def add_endpoint(value):
+        value = str(value or '').strip()
+        if value and value not in endpoint_seen and len(endpoint_urls) < limit:
+            endpoint_seen.add(value)
+            endpoint_urls.append(value)
+
+    add_endpoint(base_url)
+    if base_url:
+        add_endpoint(base_url.rstrip('/'))
+        add_endpoint(base_url.rstrip('/') + '/')
+    for link in links or []:
+        add_endpoint(link.get('source_url'))
+        add_endpoint(link.get('target_url'))
+        if len(endpoint_urls) >= limit:
+            break
+    return endpoint_urls
+
+
+def _visualization_url_key(url):
+    """Return a stable identity for URLs that differ only by a trailing slash."""
+    value = str(url or '').strip()
+    parsed = urlsplit(value)
+    if not parsed.scheme or not parsed.netloc:
+        return value
+    path = parsed.path or '/'
+    if path != '/':
+        path = path.rstrip('/') or '/'
+    query = f'?{parsed.query}' if parsed.query else ''
+    return f'{parsed.scheme.lower()}://{parsed.netloc.lower()}{path}{query}'
+
+
+def _build_visualization_graph(crawled_pages, all_links, base_url=None, max_nodes=500, max_links=2000):
+    """Build a bounded graph whose nodes are selected from its edges first."""
+    pages_by_key = {}
+    page_order = []
+    for page in crawled_pages or []:
+        url = str(page.get('url') or '').strip()
+        key = _visualization_url_key(url)
+        if not url or key in pages_by_key:
+            continue
+        pages_by_key[key] = page
+        page_order.append(key)
+
+    link_rows = []
+    edge_keys = set()
+    for link in all_links or []:
+        if not link.get('is_internal'):
+            continue
+        source_url = str(link.get('source_url') or '').strip()
+        target_url = str(link.get('target_url') or '').strip()
+        source_key = _visualization_url_key(source_url)
+        target_key = _visualization_url_key(target_url)
+        if not source_key or not target_key or source_key == target_key:
+            continue
+        edge_key = (source_key, target_key)
+        if edge_key in edge_keys:
+            continue
+        edge_keys.add(edge_key)
+        link_rows.append((source_key, target_key))
+
+    root_key = _visualization_url_key(base_url)
+    ordered_keys = list(page_order)
+    if root_key in pages_by_key:
+        ordered_keys.remove(root_key)
+        ordered_keys.insert(0, root_key)
+
+    if len(ordered_keys) > max_nodes:
+        selected_keys = []
+        selected_set = set()
+
+        def add_page(key):
+            if key in pages_by_key and key not in selected_set and len(selected_keys) < max_nodes:
+                selected_set.add(key)
+                selected_keys.append(key)
+
+        add_page(root_key)
+        for source_key, target_key in link_rows:
+            add_page(source_key)
+            add_page(target_key)
+            if len(selected_keys) >= max_nodes:
+                break
+        for key in ordered_keys:
+            add_page(key)
+            if len(selected_keys) >= max_nodes:
+                break
+    else:
+        selected_keys = ordered_keys
+        selected_set = set(selected_keys)
+
+    nodes = []
+    url_to_id = {}
+    for idx, key in enumerate(selected_keys):
+        page = pages_by_key[key]
+        url = str(page.get('url') or '').strip()
+        try:
+            status_code = int(page.get('status_code') or 0)
+        except (TypeError, ValueError):
+            status_code = 0
+
+        if 200 <= status_code < 300:
+            color = '#10b981'
+        elif 300 <= status_code < 400:
+            color = '#3b82f6'
+        elif 400 <= status_code < 500:
+            color = '#f59e0b'
+        elif 500 <= status_code < 600:
+            color = '#ef4444'
+        else:
+            color = '#6b7280'
+
+        node_id = f'node-{idx}'
+        url_to_id[key] = node_id
+        nodes.append({
+            'data': {
+                'id': node_id,
+                'label': url.split('/')[-1] or url.split('//')[-1],
+                'url': url,
+                'status_code': status_code,
+                'title': page.get('title', ''),
+                'color': color,
+                'size': 30 if root_key and key == root_key else 20,
+                'depth': page.get('depth', 0),
+            }
+        })
+
+    edges = []
+    seen_edges = set()
+    for source_key, target_key in link_rows:
+        source_id = url_to_id.get(source_key)
+        target_id = url_to_id.get(target_key)
+        if not source_id or not target_id or source_id == target_id:
+            continue
+        edge_key = (source_key, target_key)
+        if edge_key in seen_edges:
+            continue
+        seen_edges.add(edge_key)
+        edges.append({
+            'data': {
+                'id': f'edge-{source_id}-{target_id}',
+                'source': source_id,
+                'target': target_id,
+            }
+        })
+        if len(edges) >= max_links:
+            break
+
+    return nodes, edges
 
 
 @app.route('/api/visualization_data')
@@ -2379,78 +2578,23 @@ def visualization_data():
             if not user_can_access_crawl(crawl, session.get('user_id'), ensure_session_id()):
                 return jsonify({'success': False, 'error': 'No autorizado'}), 403
 
-            crawled_pages, all_links, total_pages = _load_visualization_rows(crawl_id)
+            crawled_pages, all_links, total_pages, total_links = _load_visualization_rows(
+                crawl_id,
+                base_url=crawl.get('base_url'),
+            )
         else:
             crawler = get_or_create_crawler()
             status_data = crawler.get_status()
             crawled_pages = status_data.get('urls', [])
             all_links = status_data.get('links', [])
             total_pages = len(crawled_pages)
+            total_links = len(all_links)
 
-        # Build nodes and edges for the graph
-        nodes = []
-        edges = []
-        url_to_id = {}
-
-        # Create nodes from crawled pages (limit to prevent lag)
-        max_nodes = 500  # Optimization: limit nodes for performance
-        pages_to_visualize = crawled_pages[:max_nodes]
-
-        for idx, page in enumerate(pages_to_visualize):
-            url = page.get('url', '')
-            status_code = page.get('status_code', 0)
-
-            # Assign color based on status code
-            if 200 <= status_code < 300:
-                color = '#10b981'  # Green for 2xx
-            elif 300 <= status_code < 400:
-                color = '#3b82f6'  # Blue for 3xx
-            elif 400 <= status_code < 500:
-                color = '#f59e0b'  # Orange for 4xx
-            elif 500 <= status_code < 600:
-                color = '#ef4444'  # Red for 5xx
-            else:
-                color = '#6b7280'  # Gray for other
-
-            # Create node
-            node = {
-                'data': {
-                    'id': f'node-{idx}',
-                    'label': url.split('/')[-1] or url.split('//')[-1],  # Use last path segment or domain
-                    'url': url,
-                    'status_code': status_code,
-                    'title': page.get('title', ''),
-                    'color': color,
-                    'size': 30 if idx == 0 else 20,  # Make root node larger
-                    'depth': page.get('depth', 0)
-                }
-            }
-            nodes.append(node)
-            url_to_id[url] = f'node-{idx}'
-
-        # Create edges from links data
-        # Links are stored as: {'source_url': url, 'target_url': url, 'is_internal': bool, ...}
-        edges_set = set()  # Use set to avoid duplicate edges
-        for link in all_links:
-            if link.get('is_internal'):  # Only use internal links
-                source_url = link.get('source_url', '')
-                target_url = link.get('target_url', '')
-
-                source_id = url_to_id.get(source_url)
-                target_id = url_to_id.get(target_url)
-
-                if source_id and target_id and source_id != target_id:
-                    edge_key = f'{source_id}-{target_id}'
-                    if edge_key not in edges_set:
-                        edges_set.add(edge_key)
-                        edge = {
-                            'data': {
-                                'id': f'edge-{edge_key}',
-                                'source': source_id,
-                                'target': target_id
-                            }
-                        }
-                        edges.append(edge)
+        nodes, edges = _build_visualization_graph(
+            crawled_pages,
+            all_links,
+            base_url=(crawl.get('base_url') if crawl_id else status_data.get('base_url')),
+        )
 
         return jsonify({
             'success': True,
@@ -2458,7 +2602,9 @@ def visualization_data():
             'edges': edges,
             'total_pages': total_pages,
             'visualized_pages': len(nodes),
-            'truncated': total_pages > max_nodes
+            'total_links': total_links,
+            'visualized_links': len(edges),
+            'truncated': total_pages > 500,
         })
 
     except Exception as e:
@@ -2469,7 +2615,9 @@ def visualization_data():
             'success': False,
             'error': str(e),
             'nodes': [],
-            'edges': []
+            'edges': [],
+            'total_links': 0,
+            'visualized_links': 0,
         })
 
 @app.route('/api/debug/memory')
