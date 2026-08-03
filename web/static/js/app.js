@@ -352,16 +352,12 @@ async function pollCrawlProgress() {
             updateStatus('Rastreo en curso...');
         }
 
-        const vizTab = document.getElementById('visualization-tab');
-        if (vizTab && vizTab.classList.contains('active') && typeof loadVisualizationData === 'function') {
-            loadVisualizationData();
-        }
-
         if (data.status === 'demo_stopped' || data.demo_stopped) {
             crawlState.isRunning = false;
             updateCrawlButtons();
             updateStatus('Límite de demo alcanzado: datos del rastreo guardados');
             showDemoLimitNotification();
+            refreshVisualizationAfterCrawl();
         } else if (crawlState.isRunning && data.status !== 'completed' && data.status !== 'failed' && data.status !== 'stopped') {
             setTimeout(pollCrawlProgress, 1000);
         } else if (data.status === 'completed') {
@@ -369,6 +365,7 @@ async function pollCrawlProgress() {
             updateCrawlButtons();
             hideProgress();
             updateStatus('Rastreo completado');
+            refreshVisualizationAfterCrawl();
             if (window.MitmoreSEOCrawlPlugin && window.MitmoreSEOCrawlPlugin.loader) {
                 window.MitmoreSEOCrawlPlugin.loader.notifyCrawlComplete({
                     urls: crawlState.urls,
@@ -388,6 +385,13 @@ async function pollCrawlProgress() {
         if (crawlState.isRunning) {
             setTimeout(pollCrawlProgress, 1000);
         }
+    }
+}
+
+function refreshVisualizationAfterCrawl() {
+    const vizTab = document.getElementById('visualization-tab');
+    if (vizTab && vizTab.classList.contains('active') && typeof window.loadVisualizationData === 'function') {
+        window.loadVisualizationData();
     }
 }
 
