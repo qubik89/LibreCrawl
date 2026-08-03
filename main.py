@@ -934,7 +934,9 @@ def run_report_quality_cycle(client, model, model_metadata, facts, analysis, doc
     try:
         model_before = normalise_quality_review(parse_json_response(review_text))
     except ValueError as exc:
-        model_before = _failed_quality_review(f'Invalid independent review JSON: {exc}')
+        model_before = _technical_quality_review(
+            _structured_generation_error('independent quality review', exc, review_usage)
+        )
     combined_before = merge_quality_reviews(deterministic_before, model_before)
 
     repaired = False
@@ -943,7 +945,7 @@ def run_report_quality_cycle(client, model, model_metadata, facts, analysis, doc
     deterministic_after = deterministic_before
     model_after = model_before
     combined_after = combined_before
-    if not combined_before['passed']:
+    if combined_before.get('verdict') == 'fail':
         repaired = True
         if stage_callback:
             stage_callback('repair')
@@ -959,20 +961,23 @@ def run_report_quality_cycle(client, model, model_metadata, facts, analysis, doc
                 prompt_bundle['language'], prompt_bundle['commercial_context'], client_context,
             )
         except ValueError as exc:
-            repair_error = f'Invalid repair JSON: {exc}'
+            repair_error = _structured_generation_error('report repair', exc, repair_usage)
 
         deterministic_after = validate_report_package(facts, analysis, document)
         if repair_error:
-            deterministic_after = _quality_review_with_failure(deterministic_after, repair_error)
-        final_text, final_usage = generate_report_quality_review(
-            client, model, facts, analysis, document, prompt_bundle, deterministic_after, model_metadata,
-        )
-        if final_usage:
-            usage.append(final_usage)
-        try:
-            model_after = normalise_quality_review(parse_json_response(final_text))
-        except ValueError as exc:
-            model_after = _failed_quality_review(f'Invalid final review JSON: {exc}')
+            model_after = _technical_quality_review(repair_error)
+        else:
+            final_text, final_usage = generate_report_quality_review(
+                client, model, facts, analysis, document, prompt_bundle, deterministic_after, model_metadata,
+            )
+            if final_usage:
+                usage.append(final_usage)
+            try:
+                model_after = normalise_quality_review(parse_json_response(final_text))
+            except ValueError as exc:
+                model_after = _technical_quality_review(
+                    _structured_generation_error('final quality review', exc, final_usage)
+                )
         combined_after = merge_quality_reviews(deterministic_after, model_after)
 
     quality = {
@@ -992,33 +997,30 @@ def run_report_quality_cycle(client, model, model_metadata, facts, analysis, doc
     return analysis, document, quality, usage
 
 
-def _failed_quality_review(message):
+def _technical_quality_review(message):
     return {
-        'verdict': 'fail', 'passed': False, 'score': 0,
-        'issues': [{
-            'code': 'quality-review-invalid', 'severity': 'critical', 'target': 'document',
-            'target_id': None, 'message': message,
-            'repair_instruction': 'Repeat the independent review with valid contract JSON.', 'source': 'model',
-        }],
+        'verdict': 'error', 'passed': False, 'score': None, 'issues': [],
+        'technical_error': message,
     }
 
 
-def _quality_review_with_failure(review, message):
-    result = dict(review)
-    result['issues'] = list(review.get('issues') or []) + [{
-        'code': 'repair-invalid', 'severity': 'critical', 'target': 'document', 'target_id': None,
-        'message': message, 'repair_instruction': 'Produce a valid repair object.', 'source': 'deterministic',
-    }]
-    result.update({'verdict': 'fail', 'passed': False, 'score': 0})
-    return result
+def _structured_generation_error(stage, exc, usage):
+    attempts = list((usage or {}).get('_attempts') or [])
+    if not attempts and usage:
+        attempts = [usage]
+    reasons = [
+        ((item or {}).get('_response') or {}).get('finish_reason')
+        for item in attempts
+    ]
+    if 'length' in reasons:
+        return f'The {stage} response was truncated before completing valid JSON.'
+    return f'The {stage} response did not contain valid contract JSON: {exc}'
 
 
 def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_analysis=None, shared_analysis_usage=None):
     """Generate one V2 document from shared facts and a JSON-only model contract."""
     from src.openrouter_client import OpenRouterClient, generate_report_analysis, generate_report_document
-    from src.reporting_documents import (
-        document_markdown, fallback_analysis, normalise_analysis, normalise_document, parse_json_response,
-    )
+    from src.reporting_documents import document_markdown, normalise_analysis, normalise_document, parse_json_response
     from src.reporting_pdf import render_report_document_html, render_report_pdf, report_output_paths
     from src.reporting_prompts import get_prompt_bundle
     from src.reporting_settings import get_openrouter_model
@@ -1041,13 +1043,8 @@ def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_a
         analysis_text, analysis_usage = generate_report_analysis(client, model, facts, analysis_bundle, model_metadata)
         try:
             analysis = normalise_analysis(parse_json_response(analysis_text), facts, options['language'])
-        except ValueError:
-            analysis = fallback_analysis(facts, options['language'])
-            analysis.setdefault('limitations', []).append(
-                'The automated analysis did not return valid JSON; deterministic prioritisation was applied.'
-                if options['language'] == 'en'
-                else 'El análisis automático no devolvió JSON válido; se aplicó una priorización determinista.'
-            )
+        except ValueError as exc:
+            raise RuntimeError(_structured_generation_error('SEO analysis', exc, analysis_usage)) from exc
 
     prompt_bundle = get_prompt_bundle(
         options['language'], options.get('report_type') or options['tone'], options.get('commercial_context'),
@@ -1061,16 +1058,8 @@ def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_a
             parse_json_response(document_text), facts, analysis, prompt_bundle['report_type'],
             options['language'], options.get('commercial_context'), options.get('client_context'),
         )
-    except ValueError:
-        document = normalise_document(
-            None, facts, analysis, prompt_bundle['report_type'], options['language'],
-            options.get('commercial_context'), options.get('client_context'),
-        )
-        analysis.setdefault('limitations', []).append(
-            'The automated document did not return valid JSON; deterministic editorial composition was applied.'
-            if options['language'] == 'en'
-            else 'La redacción automática no devolvió JSON válido; se aplicó la composición editorial determinista.'
-        )
+    except ValueError as exc:
+        raise RuntimeError(_structured_generation_error('report composition', exc, document_usage)) from exc
 
     analysis, document, quality, quality_usage = run_report_quality_cycle(
         client, model, model_metadata, facts, analysis, document, prompt_bundle,
@@ -1097,11 +1086,18 @@ def _run_report_job_v2(report_id, crawl_id, options, shared_facts=None, shared_a
     manifest['cost_usd'] = actual_cost
     paths['manifest'].write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
     if not final_quality['passed']:
-        error = (
-            f"The report did not pass quality control ({final_quality['score']}/100)."
-            if options['language'] == 'en'
-            else f"El informe no superó el control de calidad ({final_quality['score']}/100)."
-        )
+        if final_quality.get('verdict') == 'error':
+            error = (
+                'The report content was preserved, but the independent quality review could not be completed.'
+                if options['language'] == 'en'
+                else 'El contenido del informe se conservó, pero no pudo completarse la revisión de calidad independiente.'
+            )
+        else:
+            error = (
+                f"The report did not pass quality control ({final_quality['score']}/100)."
+                if options['language'] == 'en'
+                else f"El informe no superó el control de calidad ({final_quality['score']}/100)."
+            )
         update_report_job(
             report_id, status='failed', stage='failed', error=error,
             report_type=prompt_bundle['report_type'], commercial_context=options.get('commercial_context'),
@@ -1158,7 +1154,7 @@ def run_report_pack(crawl_id, jobs):
     if facts is not None:
         try:
             from src.openrouter_client import OpenRouterClient, generate_report_analysis
-            from src.reporting_documents import fallback_analysis, normalise_analysis, parse_json_response
+            from src.reporting_documents import normalise_analysis, parse_json_response
             from src.reporting_prompts import get_prompt_bundle
             from src.reporting_settings import get_openrouter_model
 
@@ -1171,23 +1167,14 @@ def run_report_pack(crawl_id, jobs):
             try:
                 analysis = normalise_analysis(parse_json_response(raw_analysis), facts, shared_options['language'])
             except ValueError:
-                analysis = fallback_analysis(facts, shared_options['language'])
-                limitation = (
-                    'The shared analysis did not return valid JSON; deterministic prioritisation was applied.'
-                    if shared_options['language'] == 'en'
-                    else 'El análisis compartido no devolvió JSON válido; se aplicó una priorización determinista.'
-                )
-                analysis.setdefault('limitations', []).append(limitation)
+                # Let each product retry the schema-bound analysis. A shared
+                # placeholder would make every document look valid while
+                # discarding the model's actual SEO reasoning.
+                analysis = None
         except Exception:
-            # Keep the single facts snapshot and let each product use its
-            # deterministic analysis fallback instead of issuing three model
-            # analysis calls.
-            analysis = fallback_analysis(facts, shared_options['language'])
-            analysis.setdefault('limitations', []).append(
-                'The shared analysis service was unavailable; deterministic prioritisation was applied.'
-                if shared_options['language'] == 'en'
-                else 'El servicio de análisis compartido no estaba disponible; se aplicó una priorización determinista.'
-            )
+            # Individual jobs retry independently so an unavailable shared
+            # call cannot silently downgrade an entire report pack.
+            analysis = None
     if facts is not None:
         for report_id, _ in jobs:
             update_report_job(report_id, stage='analysis')
@@ -1871,16 +1858,20 @@ def _report_source_statuses(facts):
 def _report_cost_estimate(model, report_types, facts):
     """Estimate token envelope; return no money when provider pricing is absent."""
     from src.reporting_settings import get_openrouter_model
+    from src.reporting_v2 import model_audit_facts
 
     metadata = get_openrouter_model(model) if model else None
     types = report_types or ['executive']
-    writer_budgets = {'executive': 6000, 'commercial': 9000, 'technical': 16000}
-    repair_budgets = {'executive': 7000, 'commercial': 10000, 'technical': 18000}
-    facts_tokens = max(1, len(json.dumps(facts or {}, ensure_ascii=False)) // 4)
-    normal_output = 6000 + sum(writer_budgets.get(item, 6000) + 4000 for item in types)
-    maximum_output = 6000 + sum(writer_budgets.get(item, 6000) + 4000 + repair_budgets.get(item, 7000) + 4000 for item in types)
+    writer_budgets = {'executive': 18000, 'commercial': 26000, 'technical': 45000}
+    repair_budgets = {'executive': 24000, 'commercial': 34000, 'technical': 56000}
+    model_facts = model_audit_facts(facts or {})
+    facts_tokens = max(1, len(json.dumps(model_facts, ensure_ascii=False)) // 4)
+    normal_output = 18000 + sum(writer_budgets.get(item, 18000) + 12000 for item in types)
+    maximum_output = int(18000 * 2.5) + sum(int(
+        (writer_budgets.get(item, 18000) + 12000 + repair_budgets.get(item, 24000) + 12000) * 2.5
+    ) for item in types)
     normal_calls = 1 + (len(types) * 2)
-    maximum_calls = 1 + (len(types) * 4)
+    maximum_calls = 2 + (len(types) * 8)
     result = {
         'model': model, 'normal_calls': normal_calls, 'maximum_calls': maximum_calls,
         'normal_output_tokens': normal_output, 'maximum_output_tokens': maximum_output,

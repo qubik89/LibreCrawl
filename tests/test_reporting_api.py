@@ -869,6 +869,40 @@ class ReportingApiHelperTest(unittest.TestCase):
             self.assertEqual(completed['template_version'], '2.0')
             self.assertEqual(completed['usage']['total'], {'prompt_tokens': 4, 'completion_tokens': 10})
 
+    def test_v2_invalid_model_analysis_fails_technically_instead_of_using_a_placeholder(self):
+        facts = {
+            'schema_version': '2.0', 'crawl': {'id': 42, 'base_domain': 'example.test'},
+            'coverage': {'denominators': {}}, 'distributions': {}, 'thematic_metrics': {},
+            'evidence': {}, 'limitations': [],
+        }
+
+        with mock.patch('src.reporting_jobs.update_report_job') as update_job:
+            with mock.patch('src.openrouter_client.OpenRouterClient'):
+                with mock.patch(
+                    'src.openrouter_client.generate_report_analysis',
+                    return_value=('{"findings":', {
+                        'completion_tokens': 18000,
+                        '_response': {'finish_reason': 'length', 'id': 'generation-1'},
+                    }),
+                ):
+                    with mock.patch('src.openrouter_client.generate_report_document') as document:
+                        with mock.patch(
+                            'src.reporting_settings.get_openrouter_model', return_value={'supported_parameters': []},
+                        ):
+                            main.run_report_job(3, 42, {
+                                'use_v2': True, 'model': 'anthropic/claude-sonnet-5', 'language': 'es-ES',
+                                'tone': 'executive', 'report_type': 'executive',
+                                'commercial_context': 'existing_client', 'branding': {},
+                                'client_context': {}, 'openrouter_api_key': 'sk-test',
+                                'baseline_crawl_id': None, 'enrichments': {},
+                            }, shared_facts=facts)
+
+        document.assert_not_called()
+        failed = update_job.call_args_list[-1].kwargs
+        self.assertEqual(failed['status'], 'failed')
+        self.assertIn('truncated', failed['error'].lower())
+        self.assertNotIn('deterministic', failed['error'].lower())
+
     def test_quality_cycle_runs_exactly_one_repair_and_rechecks(self):
         facts = {'evidence': {'issues': [{'id': 'issues-1'}]}}
         analysis = {
@@ -937,6 +971,40 @@ class ReportingApiHelperTest(unittest.TestCase):
             {'completion_tokens': 2}, {'completion_tokens': 3}, {'completion_tokens': 2},
         ])
 
+    def test_invalid_model_review_is_a_technical_failure_and_does_not_repair_content(self):
+        facts = {'evidence': {}, 'metric_catalog': []}
+        analysis = {'findings': [], 'recommendations': [], 'limitations': []}
+        document = {
+            'report_type': 'executive', 'commercial_context': 'prospect', 'language': 'es-ES',
+            'title': 'Informe', 'subtitle': '', 'sections': [], 'closing': '', 'client_context': {},
+        }
+
+        with mock.patch(
+            'src.openrouter_client.generate_report_quality_review',
+            return_value=('{"verdict":', {
+                'completion_tokens': 4000,
+                '_response': {'finish_reason': 'length', 'id': 'generation-1'},
+            }),
+        ) as review:
+            with mock.patch('src.openrouter_client.generate_report_repair') as repair:
+                _, _, quality, usage = main.run_report_quality_cycle(
+                    mock.Mock(), 'anthropic/claude-sonnet-5', {'supported_parameters': []},
+                    facts, analysis, document,
+                    {
+                        'report_type': 'executive', 'language': 'es-ES',
+                        'commercial_context': 'prospect', 'quality_review_system_prompt': 'review',
+                        'repair_system_prompt': 'repair', 'tone_prompt': 'executive',
+                    },
+                )
+
+        review.assert_called_once()
+        repair.assert_not_called()
+        self.assertEqual(quality['final']['combined']['verdict'], 'error')
+        self.assertIsNone(quality['final']['combined']['score'])
+        self.assertIn('truncated', quality['final']['combined']['technical_error'].lower())
+        self.assertFalse(quality['repair']['attempted'])
+        self.assertEqual(usage[0]['completion_tokens'], 4000)
+
     def test_v2_failed_quality_gate_keeps_diagnostic_artifacts_without_rendering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir)
@@ -969,7 +1037,12 @@ class ReportingApiHelperTest(unittest.TestCase):
                             'src.openrouter_client.generate_report_quality_review',
                             side_effect=[(failed_review, {}), (failed_review, {})],
                         ):
-                            with mock.patch('src.openrouter_client.generate_report_repair', return_value=('{}', {})) as repair:
+                            with mock.patch(
+                                'src.openrouter_client.generate_report_repair',
+                                return_value=(json.dumps({'analysis': analysis, 'document': {
+                                    'title': 'Informe', 'subtitle': '', 'sections': [], 'closing': '',
+                                }}), {}),
+                            ) as repair:
                                 with mock.patch('src.reporting_pdf.report_output_paths', return_value=paths):
                                     with mock.patch('src.reporting_pdf.render_report_document_html') as render_html:
                                         with mock.patch('src.reporting_pdf.render_report_pdf') as render_pdf:

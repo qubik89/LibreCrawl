@@ -619,7 +619,7 @@ def _dashboard_exclusion_conditions(patterns):
         values.append(escaped.replace('*', '%').replace('?', '_').replace("'", "\\'"))
     if not values:
         return ''
-    clauses = [f"path(i.url) NOT LIKE '{value}' ESCAPE '\\\\'" for value in values]
+    clauses = [f"path(i.url) NOT LIKE '{value}'" for value in values]
     return 'AND ' + ' AND '.join(clauses)
 
 
@@ -652,7 +652,7 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
             argMax(h1, row_order) AS h1,
             argMax(word_count, row_order) AS word_count,
             argMax(response_time_ms, row_order) AS response_time_ms,
-            argMax(row_json, row_order) AS row_json
+            argMax(row_json, row_order) AS latest_row_json
         FROM {urls_table}
         WHERE crawl_id = {crawl_id}
         GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url)
@@ -662,7 +662,7 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
             coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS url, category, issue,
             argMax(type, row_order) AS type,
             argMax(details, row_order) AS details,
-            argMax(row_json, row_order) AS row_json
+            argMax(row_json, row_order) AS latest_row_json
         FROM {issues_table}
         WHERE crawl_id = {crawl_id}
         GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url), category, issue
@@ -675,7 +675,7 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
             argMax(is_internal, row_order) AS is_internal,
             argMax(target_status, row_order) AS target_status,
             argMax(target_domain, row_order) AS target_domain,
-            argMax(row_json, row_order) AS row_json
+            argMax(row_json, row_order) AS latest_row_json
         FROM {links_table}
         WHERE crawl_id = {crawl_id}
         GROUP BY
@@ -740,19 +740,19 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
         ''').result_rows[0]
         url_samples = _report_rows(client.query(f'''
             WITH latest_urls AS ({latest_urls})
-            SELECT row_json FROM latest_urls
+            SELECT latest_row_json FROM latest_urls
             ORDER BY cityHash64(concat(url, toString(status_code)))
             LIMIT {sample_limit}
         ''').result_rows)
         link_samples = _report_rows(client.query(f'''
             WITH latest_links AS ({latest_links})
-            SELECT row_json FROM latest_links
+            SELECT latest_row_json FROM latest_links
             ORDER BY cityHash64(concat(source_url, target_url, anchor_text, placement))
             LIMIT {sample_limit}
         ''').result_rows)
         issue_samples = _report_rows(client.query(f'''
             WITH latest_issues AS ({latest_issues})
-            SELECT row_json FROM latest_issues
+            SELECT latest_row_json FROM latest_issues
             ORDER BY cityHash64(concat(url, category, issue))
             LIMIT {issue_limit}
         ''').result_rows)
@@ -826,7 +826,7 @@ def _report_noindex_count(client, latest_urls):
     try:
         return int(client.query(f'''
             WITH latest_urls AS ({latest_urls})
-            SELECT countIf(positionCaseInsensitive(JSONExtractString(row_json, 'robots'), 'noindex') > 0)
+            SELECT countIf(positionCaseInsensitive(JSONExtractString(latest_row_json, 'robots'), 'noindex') > 0)
             FROM latest_urls
         ''').result_rows[0][0])
     except Exception:
@@ -839,8 +839,8 @@ def _report_sitemap_count(client, latest_urls):
         row = client.query(f'''
             WITH latest_urls AS ({latest_urls})
             SELECT
-                countIf(JSONHas(row_json, 'in_sitemap')),
-                countIf(JSONExtractBool(row_json, 'in_sitemap'))
+                countIf(JSONHas(latest_row_json, 'in_sitemap')),
+                countIf(JSONExtractBool(latest_row_json, 'in_sitemap'))
             FROM latest_urls
         ''').result_rows[0]
         return int(row[1]) if int(row[0]) else None

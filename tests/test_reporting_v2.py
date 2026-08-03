@@ -235,6 +235,63 @@ class ReportingV2Test(unittest.TestCase):
         self.assertEqual(facts['evidence']['urls'][0]['id'], 'urls-1')
         self.assertEqual(facts['coverage']['coverage_ratio'], 60.0)
 
+    def test_model_facts_keep_seo_evidence_without_raw_page_payloads(self):
+        facts = {
+            'schema_version': '2.0',
+            'coverage': {'denominators': {'unique_urls': 1}},
+            'evidence': {'urls': [{
+                'id': 'urls-1', 'url': 'https://example.test/', 'status_code': 200,
+                'title': 'Home', 'canonical_url': 'https://example.test/',
+                'images': [{'src': f'https://cdn.test/{index}.jpg', 'alt': ''} for index in range(100)],
+                'json_ld': [{'@context': 'https://schema.org', '@type': 'Organization', 'name': 'Example'}],
+                'og_tags': {'og:title': 'Home', 'og:image': 'https://cdn.test/hero.jpg'},
+                'twitter_tags': {'twitter:card': 'summary_large_image'},
+                'meta_tags': {'robots': 'index,follow'},
+            }], 'links': [], 'issues': []},
+            'limitations': [],
+        }
+
+        projected = reporting_v2.model_audit_facts(facts)
+        row = projected['evidence']['urls'][0]
+
+        self.assertEqual(row['id'], 'urls-1')
+        self.assertEqual(row['canonical_url'], 'https://example.test/')
+        self.assertEqual(row['image_summary'], {'total': 100, 'missing_alt': 100, 'broken': 0})
+        self.assertEqual(row['structured_data_types'], ['Organization'])
+        self.assertTrue(row['open_graph_present'])
+        self.assertTrue(row['twitter_card_present'])
+        self.assertNotIn('images', row)
+        self.assertNotIn('json_ld', row)
+        self.assertNotIn('meta_tags', row)
+
+    def test_inconsistent_discovery_denominator_is_declared_instead_of_showing_over_100_percent(self):
+        source = {
+            'coverage': {'source': 'clickhouse', 'denominators': {'unique_urls': 8}},
+            'thematic_metrics': {}, 'distributions': {}, 'evidence': {}, 'limitations': [],
+        }
+        with mock.patch.object(reporting_v2.crawl_clickhouse, 'get_report_facts', return_value=source):
+            with mock.patch.object(reporting_v2.crawl_db, 'load_crawl_enrichments', return_value={}):
+                facts = reporting_v2.build_audit_facts(42, {'id': 42, 'urls_discovered': 5})
+
+        self.assertIsNone(facts['coverage']['coverage_ratio'])
+        self.assertTrue(any('discovered URL denominator' in item for item in facts['limitations']))
+
+    def test_row_fallback_reports_the_source_that_actually_supplied_evidence(self):
+        clickhouse_urls = {'rows': [self.urls[0]]}
+        empty_page = {'rows': []}
+        with mock.patch.object(reporting_v2.crawl_clickhouse, 'get_report_facts', return_value=None):
+            with mock.patch.object(reporting_v2.crawl_clickhouse, 'load_urls', return_value=clickhouse_urls):
+                with mock.patch.object(reporting_v2.crawl_clickhouse, 'load_links', return_value=empty_page):
+                    with mock.patch.object(reporting_v2.crawl_clickhouse, 'load_issues', return_value=empty_page):
+                        with mock.patch.object(reporting_v2.crawl_db, 'load_crawled_urls') as sqlite_urls:
+                            with mock.patch.object(reporting_v2.crawl_db, 'load_crawl_enrichments', return_value={}):
+                                facts = reporting_v2.build_audit_facts(42, {'id': 42, 'urls_discovered': 1})
+
+        sqlite_urls.assert_not_called()
+        self.assertEqual(facts['coverage']['source'], 'clickhouse_rows')
+        self.assertTrue(any('Fallback evidence' in item for item in facts['limitations']))
+        self.assertFalse(any('SQLite fallback' in item for item in facts['limitations']))
+
     def test_stored_enrichment_data_redacts_connection_material(self):
         clean = reporting_v2._normalise_enrichments({
             'gsc': {'status': 'available', 'data': {

@@ -5,6 +5,7 @@ snapshot.  It keeps raw crawler records out of prompts and makes every metric
 carry a clear denominator.
 """
 
+import copy
 import hashlib
 import math
 from collections import Counter, defaultdict
@@ -17,6 +18,19 @@ AUDIT_FACTS_VERSION = '2.0'
 FALLBACK_SCAN_LIMIT = 5000
 DEFAULT_SAMPLE_LIMIT = 30
 DEFAULT_ISSUE_LIMIT = 60
+
+MODEL_URL_FIELDS = (
+    'id', 'url', 'requested_url', 'final_url', 'status_code', 'error_type',
+    'content_type', 'size', 'is_internal', 'depth', 'title', 'meta_description',
+    'h1', 'h2', 'h3', 'word_count', 'canonical_url', 'lang', 'robots',
+    'in_sitemap', 'response_time', 'response_time_ms', 'internal_links',
+    'external_links', 'javascript_rendered', 'redirect_chain', 'hreflang',
+)
+MODEL_LINK_FIELDS = (
+    'id', 'source_url', 'source_final_url', 'target_url', 'target_final_url',
+    'anchor_text', 'placement', 'is_internal', 'target_status', 'target_domain',
+)
+MODEL_ISSUE_FIELDS = ('id', 'url', 'final_url', 'category', 'issue', 'type', 'details')
 
 
 def build_audit_facts(crawl_id, crawl_metadata=None, baseline_crawl_id=None, enrichments=None,
@@ -40,12 +54,22 @@ def build_audit_facts(crawl_id, crawl_metadata=None, baseline_crawl_id=None, enr
     if discovered is not None:
         denominators['discovered_urls'] = discovered
     coverage['denominators'] = denominators
-    coverage['coverage_ratio'] = _ratio(denominators.get('unique_urls'), discovered)
+    unique_urls = denominators.get('unique_urls')
+    inconsistent_discovery = (
+        isinstance(unique_urls, (int, float)) and isinstance(discovered, (int, float))
+        and discovered >= 0 and unique_urls > discovered
+    )
+    coverage['coverage_ratio'] = None if inconsistent_discovery else _ratio(unique_urls, discovered)
 
     stored_enrichments = _stored_enrichments(crawl_id)
     merged_enrichments = _merge_enrichment_references(stored_enrichments, enrichments)
     comparison = _comparison(crawl_id, baseline_crawl_id, source_facts, sample_limit, issue_limit)
     limitations = list(source_facts.get('limitations') or [])
+    if inconsistent_discovery:
+        limitations.append(
+            'The discovered URL denominator is lower than the final unique URL count; '
+            'crawl coverage is not reported until both lifecycle counters are reconciled.'
+        )
     if denominators.get('sitemap_urls') is None:
         limitations.append('Sitemap membership and sitemap/crawl overlap were not persisted for this crawl; no sitemap conclusion is available.')
     snapshot = {
@@ -69,6 +93,71 @@ def build_audit_facts(crawl_id, crawl_metadata=None, baseline_crawl_id=None, enr
     }
     snapshot['metric_catalog'] = _build_metric_catalog(snapshot)
     return _jsonable(snapshot)
+
+
+def model_audit_facts(facts):
+    """Return a semantically complete, prompt-safe projection of AuditFactsV2.
+
+    The immutable artifact retains every crawler field. Model stages receive
+    the same metrics and samples without bulky HTML-adjacent payloads such as
+    full image arrays, raw social tags, or complete JSON-LD documents.
+    """
+    projected = copy.deepcopy(facts or {})
+    evidence = projected.get('evidence') or {}
+    evidence['urls'] = [_model_url_evidence(row) for row in evidence.get('urls') or []]
+    evidence['links'] = [_pick_fields(row, MODEL_LINK_FIELDS) for row in evidence.get('links') or []]
+    evidence['issues'] = [_pick_fields(row, MODEL_ISSUE_FIELDS) for row in evidence.get('issues') or []]
+    projected['evidence'] = evidence
+    return _jsonable(projected)
+
+
+def _model_url_evidence(row):
+    result = _pick_fields(row, MODEL_URL_FIELDS)
+    images = row.get('images') if isinstance(row.get('images'), list) else []
+    broken_images = row.get('broken_images') if isinstance(row.get('broken_images'), list) else []
+    if images or broken_images:
+        result['image_summary'] = {
+            'total': len(images),
+            'missing_alt': sum(not str(item.get('alt') or '').strip() for item in images if isinstance(item, dict)),
+            'broken': len(broken_images) + sum(
+                bool(item.get('broken')) or (_int(item.get('status_code')) or 0) >= 400
+                for item in images if isinstance(item, dict)
+            ),
+        }
+    structured_types = sorted(_structured_data_types(row.get('json_ld'), row.get('schema_org')))
+    if structured_types:
+        result['structured_data_types'] = structured_types
+    result['open_graph_present'] = bool(row.get('og_tags'))
+    result['twitter_card_present'] = bool(row.get('twitter_tags'))
+    return result
+
+
+def _pick_fields(row, fields):
+    if not isinstance(row, dict):
+        return {}
+    return {key: copy.deepcopy(row[key]) for key in fields if key in row and row[key] not in (None, '', [], {})}
+
+
+def _structured_data_types(*values):
+    result = set()
+
+    def visit(value):
+        if isinstance(value, dict):
+            type_value = value.get('@type') or value.get('itemtype') or value.get('type')
+            candidates = type_value if isinstance(type_value, list) else [type_value]
+            for candidate in candidates:
+                if candidate:
+                    result.add(str(candidate).rstrip('/').rsplit('/', 1)[-1])
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    for value in values:
+        visit(value)
+    return result
 
 
 def normalise_url(url):
@@ -125,13 +214,15 @@ def _clickhouse_facts(crawl_id, sample_limit, issue_limit):
 
 
 def _fallback_facts(crawl_id, sample_limit, issue_limit):
-    urls = _load_all_fallback(crawl_clickhouse.load_urls, crawl_db.load_crawled_urls, crawl_id)
-    links = _load_all_fallback(crawl_clickhouse.load_links, crawl_db.load_crawl_links, crawl_id)
-    issues = _load_all_fallback(crawl_clickhouse.load_issues, crawl_db.load_crawl_issues, crawl_id)
+    urls, urls_source = _load_all_fallback(crawl_clickhouse.load_urls, crawl_db.load_crawled_urls, crawl_id)
+    links, links_source = _load_all_fallback(crawl_clickhouse.load_links, crawl_db.load_crawl_links, crawl_id)
+    issues, issues_source = _load_all_fallback(crawl_clickhouse.load_issues, crawl_db.load_crawl_issues, crawl_id)
     latest_urls = _latest_by_url(urls)
     unique_links = _unique_links(links)
     unique_issues = _unique_issues(issues)
-    return _facts_from_rows(latest_urls, unique_links, unique_issues, sample_limit, issue_limit, source='sqlite')
+    sources = {urls_source, links_source, issues_source}
+    source = sources.pop() if len(sources) == 1 else 'mixed_fallback'
+    return _facts_from_rows(latest_urls, unique_links, unique_issues, sample_limit, issue_limit, source=source)
 
 
 def _load_all_fallback(clickhouse_loader, sqlite_loader, crawl_id):
@@ -140,11 +231,11 @@ def _load_all_fallback(clickhouse_loader, sqlite_loader, crawl_id):
     except Exception:
         page = None
     if page is not None:
-        return list(page.get('rows') or [])[:FALLBACK_SCAN_LIMIT]
+        return list(page.get('rows') or [])[:FALLBACK_SCAN_LIMIT], 'clickhouse_rows'
     try:
-        return list(sqlite_loader(crawl_id, limit=FALLBACK_SCAN_LIMIT, offset=0) or [])
+        return list(sqlite_loader(crawl_id, limit=FALLBACK_SCAN_LIMIT, offset=0) or []), 'sqlite'
     except Exception:
-        return []
+        return [], 'unavailable'
 
 
 def _facts_from_rows(urls, links, issues, sample_limit, issue_limit, source):
@@ -186,7 +277,8 @@ def _facts_from_rows(urls, links, issues, sample_limit, issue_limit, source):
             'issues': stratified_samples(issues, issue_limit, 'issue'),
         },
         'limitations': [
-            'SQLite fallback is capped at %s records per entity; do not extrapolate beyond the covered rows.' % FALLBACK_SCAN_LIMIT,
+            'Fallback evidence from %s is capped at %s records per entity; do not extrapolate beyond the covered rows.'
+            % (source, FALLBACK_SCAN_LIMIT),
             'Crawl request duration is not a Core Web Vital or a user-field performance metric.',
             'Crawl evidence does not establish Google indexing, traffic, conversion, or revenue.',
         ],

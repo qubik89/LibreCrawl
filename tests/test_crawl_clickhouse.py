@@ -194,6 +194,52 @@ class CrawlClickHouseTest(unittest.TestCase):
 
         self.assertIn('ORDER BY row_order DESC', client.sql[-1])
 
+    def test_dashboard_exclusions_use_clickhouse_native_like_escaping(self):
+        sql = crawl_clickhouse._dashboard_exclusion_conditions(['/private/*', '/under_score'])
+
+        self.assertIn("NOT LIKE '/private/%'", sql)
+        self.assertIn("NOT LIKE '/under\\_score'", sql)
+        self.assertNotIn(' ESCAPE ', sql)
+
+    def test_report_fact_ctes_do_not_reuse_row_json_as_an_aggregate_alias(self):
+        class ReportFactsClient:
+            def __init__(self):
+                self.sql = []
+
+            def query(self, sql):
+                self.sql.append(sql)
+                if 'quantileExact(0.5)' in sql:
+                    return FakeQueryResult([(
+                        1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+                        100, 100, 100, 100,
+                    )])
+                if 'GROUP BY status_code, error_type' in sql:
+                    return FakeQueryResult([(200, '', 1)])
+                if 'GROUP BY depth' in sql:
+                    return FakeQueryResult([(0, 1)])
+                if 'GROUP BY category, issue, type' in sql:
+                    return FakeQueryResult([])
+                if 'SELECT count() FROM latest_issues' in sql:
+                    return FakeQueryResult([(0,)])
+                if 'countIf(is_internal = 1)' in sql:
+                    return FakeQueryResult([(0, 0)])
+                if 'SELECT latest_row_json FROM latest_' in sql:
+                    return FakeQueryResult([])
+                if "positionCaseInsensitive(JSONExtractString(latest_row_json, 'robots')" in sql:
+                    return FakeQueryResult([(0,)])
+                if "JSONHas(latest_row_json, 'in_sitemap')" in sql:
+                    return FakeQueryResult([(0, 0)])
+                raise AssertionError(sql)
+
+        client = ReportFactsClient()
+        with mock.patch.object(crawl_clickhouse, 'get_client', return_value=client):
+            facts = crawl_clickhouse.get_report_facts(7)
+
+        self.assertIsNotNone(facts)
+        combined_sql = '\n'.join(client.sql)
+        self.assertNotIn('argMax(row_json, row_order) AS row_json', combined_sql)
+        self.assertIn('argMax(row_json, row_order) AS latest_row_json', combined_sql)
+
 
 if __name__ == '__main__':
     unittest.main()

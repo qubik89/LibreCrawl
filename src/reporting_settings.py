@@ -496,6 +496,12 @@ def safe_generation_params(model_metadata, desired_params):
     if 'max_tokens' in desired_params and 'max_tokens' in supported:
         safe_params['max_tokens'] = desired_params['max_tokens']
     for key, value in desired_params.items():
-        if key != 'max_tokens' and key in supported:
+        if key == 'response_format' and {'response_format', 'structured_outputs'} & supported:
             safe_params[key] = value
+        elif key not in {'max_tokens', 'provider'} and key in supported:
+            safe_params[key] = value
+    if 'response_format' in safe_params and desired_params.get('provider'):
+        # Provider routing is an OpenRouter gateway option rather than a
+        # model capability, so it is intentionally absent from model metadata.
+        safe_params['provider'] = desired_params['provider']
     return safe_params

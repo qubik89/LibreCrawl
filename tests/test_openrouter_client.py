@@ -166,7 +166,9 @@ class OpenRouterClientTest(unittest.TestCase):
     def test_v2_generation_helpers_request_json_when_supported(self):
         client = mock.Mock()
         client.chat_completion.return_value = {
-            'choices': [{'message': {'content': '{}'}}],
+            'choices': [{'message': {
+                'content': '{"findings":[],"recommendations":[],"limitations":[]}',
+            }}],
             'usage': {'total_tokens': 4},
         }
         metadata = {'supported_parameters': ['max_tokens', 'temperature', 'response_format']}
@@ -175,35 +177,135 @@ class OpenRouterClientTest(unittest.TestCase):
 
         generate_report_analysis(client, 'anthropic/claude-opus-4.7', facts, bundle, metadata)
         _, messages, params = client.chat_completion.call_args.args
-        self.assertEqual(params['response_format'], {'type': 'json_object'})
-        self.assertEqual(params['max_tokens'], 6000)
+        self.assertEqual(params['response_format']['type'], 'json_schema')
+        self.assertEqual(params['max_tokens'], 18000)
         self.assertIn('AuditFactsV2', messages[1]['content'])
 
         client.reset_mock()
+        client.chat_completion.return_value['choices'][0]['message']['content'] = (
+            '{"title":"Audit","subtitle":"","sections":[],"closing":""}'
+        )
         generate_report_document(client, 'anthropic/claude-opus-4.7', facts, {'findings': []}, bundle, {}, metadata)
         _, _, params = client.chat_completion.call_args.args
-        self.assertEqual(params['max_tokens'], 9000)
-        self.assertEqual(params['response_format'], {'type': 'json_object'})
+        self.assertEqual(params['max_tokens'], 26000)
+        self.assertEqual(params['response_format']['type'], 'json_schema')
 
         client.reset_mock()
+        client.chat_completion.return_value['choices'][0]['message']['content'] = (
+            '{"verdict":"pass","score":100,"issues":[]}'
+        )
         generate_report_quality_review(
             client, 'anthropic/claude-opus-4.7', facts, {'findings': []},
             {'sections': []}, bundle, {'passed': True}, metadata,
         )
         _, messages, params = client.chat_completion.call_args.args
-        self.assertEqual(params['max_tokens'], 4000)
+        self.assertEqual(params['max_tokens'], 12000)
         self.assertEqual(params['temperature'], 0)
         self.assertIn('Deterministic review JSON', messages[1]['content'])
 
         client.reset_mock()
+        client.chat_completion.return_value['choices'][0]['message']['content'] = (
+            '{"analysis":{"findings":[],"recommendations":[],"limitations":[]},'
+            '"document":{"title":"Audit","subtitle":"","sections":[],"closing":""}}'
+        )
         generate_report_repair(
             client, 'anthropic/claude-opus-4.7', facts, {'findings': []},
             {'sections': []}, {'verdict': 'fail'}, bundle, {}, metadata,
         )
         _, messages, params = client.chat_completion.call_args.args
-        self.assertEqual(params['max_tokens'], 10000)
+        self.assertEqual(params['max_tokens'], 34000)
         self.assertEqual(params['temperature'], 0)
         self.assertIn('Immutable AuditFactsV2 JSON', messages[1]['content'])
+
+    def test_v2_generation_uses_strict_schema_reasoning_and_provider_routing(self):
+        client = mock.Mock()
+        client.chat_completion.return_value = {
+            'id': 'generation-1',
+            'provider': 'Anthropic',
+            'choices': [{
+                'finish_reason': 'stop',
+                'native_finish_reason': 'end_turn',
+                'message': {'content': '{"findings":[],"recommendations":[],"limitations":[]}'},
+            }],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5},
+        }
+        metadata = {
+            'supported_parameters': [
+                'max_tokens', 'temperature', 'response_format', 'structured_outputs', 'reasoning',
+            ],
+        }
+
+        _, usage = generate_report_analysis(
+            client, 'anthropic/claude-sonnet-5',
+            {'schema_version': '2.0', 'evidence': {}},
+            get_prompt_bundle('es-ES', 'executive'), metadata,
+        )
+
+        params = client.chat_completion.call_args.args[2]
+        self.assertEqual(params['response_format']['type'], 'json_schema')
+        self.assertTrue(params['response_format']['json_schema']['strict'])
+        self.assertEqual(params['response_format']['json_schema']['name'], 'seo_audit_analysis')
+        self.assertEqual(params['provider'], {'require_parameters': True})
+        self.assertGreater(params['max_tokens'], params['reasoning']['max_tokens'])
+        self.assertEqual(usage['_response']['finish_reason'], 'stop')
+        self.assertEqual(usage['_response']['id'], 'generation-1')
+
+    def test_structured_generation_retries_an_invalid_or_truncated_response(self):
+        client = mock.Mock()
+        client.chat_completion.side_effect = [
+            {
+                'id': 'generation-1',
+                'choices': [{
+                    'finish_reason': 'length',
+                    'message': {'content': '{"findings":['},
+                }],
+                'usage': {'prompt_tokens': 10, 'completion_tokens': 100},
+            },
+            {
+                'id': 'generation-2',
+                'choices': [{
+                    'finish_reason': 'stop',
+                    'message': {'content': '{"findings":[],"recommendations":[],"limitations":[]}'},
+                }],
+                'usage': {'prompt_tokens': 10, 'completion_tokens': 5},
+            },
+        ]
+        metadata = {'supported_parameters': ['max_tokens', 'response_format', 'reasoning']}
+
+        content, usage = generate_report_analysis(
+            client, 'anthropic/claude-sonnet-5', {'evidence': {}},
+            get_prompt_bundle('es-ES', 'executive'), metadata,
+        )
+
+        self.assertEqual(client.chat_completion.call_count, 2)
+        self.assertIn('"findings":[]', content)
+        self.assertEqual(usage['prompt_tokens'], 20)
+        self.assertEqual(usage['completion_tokens'], 105)
+        self.assertEqual(len(usage['_attempts']), 2)
+        first_budget = client.chat_completion.call_args_list[0].args[2]['max_tokens']
+        second_budget = client.chat_completion.call_args_list[1].args[2]['max_tokens']
+        self.assertGreater(second_budget, first_budget)
+
+    def test_structured_generation_retries_json_that_breaks_the_contract(self):
+        client = mock.Mock()
+        client.chat_completion.side_effect = [
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': '{}'}}], 'usage': {}},
+            {
+                'choices': [{'finish_reason': 'stop', 'message': {
+                    'content': '{"findings":[],"recommendations":[],"limitations":[]}',
+                }}],
+                'usage': {},
+            },
+        ]
+
+        content, _ = generate_report_analysis(
+            client, 'anthropic/claude-sonnet-5', {'evidence': {}},
+            get_prompt_bundle('es-ES', 'executive'),
+            {'supported_parameters': ['max_tokens', 'response_format']},
+        )
+
+        self.assertEqual(client.chat_completion.call_count, 2)
+        self.assertIn('"recommendations":[]', content)
 
 
 if __name__ == '__main__':

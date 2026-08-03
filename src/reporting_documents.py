@@ -300,6 +300,12 @@ def normalise_quality_review(value):
 
 def merge_quality_reviews(deterministic, model_review):
     """Combine both gates; the package passes only when both reviewers pass."""
+    if (model_review or {}).get('verdict') == 'error':
+        return {
+            'verdict': 'error', 'passed': False, 'score': None,
+            'issues': list((deterministic or {}).get('issues') or []),
+            'technical_error': model_review.get('technical_error') or 'Independent review unavailable.',
+        }
     issues = _dedupe_quality_issues(
         list((deterministic or {}).get('issues') or []) + list((model_review or {}).get('issues') or [])
     )
