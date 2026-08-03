@@ -641,7 +641,7 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
     issues_table = _table('crawl_issues')
     latest_urls = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS url,
+            identity_url AS url,
             argMax(status_code, row_order) AS status_code,
             argMax(error_type, row_order) AS error_type,
             argMax(content_type, row_order) AS content_type,
@@ -653,35 +653,43 @@ def get_report_facts(crawl_id, sample_limit=30, issue_limit=60):
             argMax(word_count, row_order) AS word_count,
             argMax(response_time_ms, row_order) AS response_time_ms,
             argMax(row_json, row_order) AS latest_row_json
-        FROM {urls_table}
-        WHERE crawl_id = {crawl_id}
-        GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url)
+        FROM (
+            SELECT *, coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS identity_url
+            FROM {urls_table}
+            WHERE crawl_id = {crawl_id}
+        )
+        GROUP BY identity_url
     '''
     latest_issues = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS url, category, issue,
+            identity_url AS url, category, issue,
             argMax(type, row_order) AS type,
             argMax(details, row_order) AS details,
             argMax(row_json, row_order) AS latest_row_json
-        FROM {issues_table}
-        WHERE crawl_id = {crawl_id}
-        GROUP BY coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url), category, issue
+        FROM (
+            SELECT *, coalesce(nullIf(JSONExtractString(row_json, 'final_url'), ''), url) AS identity_url
+            FROM {issues_table}
+            WHERE crawl_id = {crawl_id}
+        )
+        GROUP BY identity_url, category, issue
     '''
     latest_links = f'''
         SELECT
-            coalesce(nullIf(JSONExtractString(row_json, 'source_final_url'), ''), source_url) AS source_url,
-            coalesce(nullIf(JSONExtractString(row_json, 'target_final_url'), ''), target_url) AS target_url,
+            identity_source_url AS source_url,
+            identity_target_url AS target_url,
             anchor_text, placement,
             argMax(is_internal, row_order) AS is_internal,
             argMax(target_status, row_order) AS target_status,
             argMax(target_domain, row_order) AS target_domain,
             argMax(row_json, row_order) AS latest_row_json
-        FROM {links_table}
-        WHERE crawl_id = {crawl_id}
-        GROUP BY
-            coalesce(nullIf(JSONExtractString(row_json, 'source_final_url'), ''), source_url),
-            coalesce(nullIf(JSONExtractString(row_json, 'target_final_url'), ''), target_url),
-            anchor_text, placement
+        FROM (
+            SELECT *,
+                coalesce(nullIf(JSONExtractString(row_json, 'source_final_url'), ''), source_url) AS identity_source_url,
+                coalesce(nullIf(JSONExtractString(row_json, 'target_final_url'), ''), target_url) AS identity_target_url
+            FROM {links_table}
+            WHERE crawl_id = {crawl_id}
+        )
+        GROUP BY identity_source_url, identity_target_url, anchor_text, placement
     '''
     try:
         url_metrics = client.query(f'''

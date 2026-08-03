@@ -239,6 +239,9 @@ class CrawlClickHouseTest(unittest.TestCase):
         combined_sql = '\n'.join(client.sql)
         self.assertNotIn('argMax(row_json, row_order) AS row_json', combined_sql)
         self.assertIn('argMax(row_json, row_order) AS latest_row_json', combined_sql)
+        self.assertIn("AS identity_url", combined_sql)
+        self.assertIn('GROUP BY identity_url', combined_sql)
+        self.assertNotIn("GROUP BY coalesce(nullIf(JSONExtractString(row_json", combined_sql)
 
 
 if __name__ == '__main__':
