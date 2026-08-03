@@ -349,8 +349,8 @@ def _analysis_schema():
         'validation': {'type': 'string'}, 'kpi': {'type': 'string'},
     })
     return _strict_object({
-        'findings': {'type': 'array', 'items': finding, 'maxItems': 20},
-        'recommendations': {'type': 'array', 'items': recommendation, 'maxItems': 30},
+        'findings': {'type': 'array', 'items': finding},
+        'recommendations': {'type': 'array', 'items': recommendation},
         'limitations': _string_array(),
     })
 
@@ -362,7 +362,7 @@ def _document_schema():
     })
     return _strict_object({
         'title': {'type': 'string'}, 'subtitle': {'type': 'string'},
-        'sections': {'type': 'array', 'items': section, 'maxItems': 16},
+        'sections': {'type': 'array', 'items': section},
         'closing': {'type': 'string'},
     })
 
@@ -377,8 +377,8 @@ def _quality_schema():
     })
     return _strict_object({
         'verdict': {'type': 'string', 'enum': ['pass', 'fail']},
-        'score': {'type': 'integer', 'minimum': 0, 'maximum': 100},
-        'issues': {'type': 'array', 'items': issue, 'maxItems': 40},
+        'score': {'type': 'integer'},
+        'issues': {'type': 'array', 'items': issue},
     })
 
 

@@ -4,6 +4,10 @@ from unittest import mock
 from src import reporting_settings
 from src.openrouter_client import (
     OpenRouterClient,
+    _analysis_schema,
+    _document_schema,
+    _quality_schema,
+    _repair_schema,
     generate_report_analysis,
     generate_report_document,
     generate_report_quality_review,
@@ -28,6 +32,19 @@ class FakeResponse:
 
 
 class OpenRouterClientTest(unittest.TestCase):
+    def test_structured_schemas_only_use_constraints_supported_by_anthropic(self):
+        unsupported = {'maxItems', 'minItems', 'minimum', 'maximum', 'minLength', 'maxLength'}
+
+        def keys(value):
+            if isinstance(value, dict):
+                return set(value).union(*(keys(item) for item in value.values()))
+            if isinstance(value, list):
+                return set().union(*(keys(item) for item in value)) if value else set()
+            return set()
+
+        for schema in (_analysis_schema(), _document_schema(), _quality_schema(), _repair_schema()):
+            self.assertFalse(keys(schema) & unsupported)
+
     @mock.patch('src.openrouter_client.requests.post')
     def test_chat_completion_posts_expected_payload(self, post):
         post.return_value = FakeResponse(payload={
