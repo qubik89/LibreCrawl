@@ -17,9 +17,69 @@ sys.modules.setdefault(
 )
 
 from src.crawler import WebCrawler
+from src.core.issue_detector import IssueDetector
+from src.core.link_manager import LinkManager
+from src.core.seo_extractor import SEOExtractor
 
 
 class CrawlerCheckpointTests(unittest.TestCase):
+    def test_discovered_counter_tracks_urls_added_after_start(self):
+        crawler = WebCrawler()
+        crawler.link_manager = LinkManager('example.com')
+        crawler.link_manager.add_url('https://example.com/', 0)
+        crawler.stats['discovered'] = 1
+
+        crawler.link_manager.add_url('https://example.com/one', 1)
+        crawler.link_manager.add_url('https://example.com/two', 1)
+        crawler._sync_discovered_count()
+
+        self.assertEqual(crawler.stats['discovered'], 3)
+
+    def test_accept_result_persists_network_error_once(self):
+        crawler = WebCrawler()
+        crawler.crawl_id = 21
+        crawler.db_save_enabled = True
+        crawler.link_manager = LinkManager('example.com')
+        crawler.issue_detector = IssueDetector([])
+        url = 'https://missing.example.invalid/'
+        crawler.link_manager.add_url(url, 0)
+        result = SEOExtractor.create_empty_result(
+            url,
+            0,
+            error='DNS lookup failed',
+            error_type='dns_not_found',
+        )
+
+        crawler._accept_crawl_result(result, requested_url=url, depth=0)
+
+        self.assertEqual(crawler.stats['discovered'], 1)
+        self.assertEqual(crawler.stats['crawled'], 1)
+        self.assertEqual(crawler.link_manager.visited_urls, {url})
+        self.assertEqual(len(crawler.unsaved_urls), 1)
+        self.assertEqual(crawler.unsaved_urls[0]['status_code'], 0)
+        self.assertEqual(crawler.unsaved_urls[0]['error_type'], 'dns_not_found')
+
+    def test_unexpected_task_failure_becomes_a_persistable_result(self):
+        crawler = WebCrawler()
+        crawler.config.update({'max_urls': 1, 'max_depth': 1, 'concurrency': 1})
+        crawler.link_manager = LinkManager('example.com')
+        crawler.issue_detector = IssueDetector([])
+        url = 'https://example.com/'
+        crawler.link_manager.add_url(url, 0)
+        crawler.is_running = True
+
+        def fail(_url, _depth):
+            raise RuntimeError('worker exploded')
+
+        crawler._crawl_url = fail
+        crawler._crawl_worker()
+
+        self.assertFalse(crawler.is_running)
+        self.assertEqual(crawler.stats['discovered'], 1)
+        self.assertEqual(crawler.stats['crawled'], 1)
+        self.assertEqual(crawler.crawl_results[0]['status_code'], 0)
+        self.assertEqual(crawler.crawl_results[0]['error_type'], 'connection_error')
+
     def test_process_pool_html_analysis_returns_the_worker_result(self):
         crawler = WebCrawler()
         expected = {'title': 'Processed outside the request worker'}
@@ -181,6 +241,30 @@ class CrawlerCheckpointTests(unittest.TestCase):
                 crawler._save_batch_to_db(force=True)
 
             self.assertEqual(update_stats.call_count, 1)
+        finally:
+            if old_storage is None:
+                os.environ.pop('CRAWL_RESULT_STORAGE', None)
+            else:
+                os.environ['CRAWL_RESULT_STORAGE'] = old_storage
+
+    def test_batch_save_uses_live_discovered_count(self):
+        old_storage = os.environ.get('CRAWL_RESULT_STORAGE')
+        crawler = WebCrawler()
+        crawler.crawl_id = 15
+        crawler.db_save_enabled = True
+        crawler.link_manager = LinkManager('example.com')
+        for suffix in ('/', '/one', '/two', '/three'):
+            crawler.link_manager.add_url(f'https://example.com{suffix}', 0)
+        crawler.stats.update({'discovered': 1, 'crawled': 2, 'depth': 1})
+
+        try:
+            os.environ['CRAWL_RESULT_STORAGE'] = 'clickhouse'
+            with mock.patch('src.crawl_db.update_crawl_stats') as update_stats:
+                crawler._save_batch_to_db(force=True)
+
+            update_stats.assert_called_once()
+            self.assertEqual(update_stats.call_args.kwargs['discovered'], 4)
+            self.assertEqual(update_stats.call_args.kwargs['crawled'], 2)
         finally:
             if old_storage is None:
                 os.environ.pop('CRAWL_RESULT_STORAGE', None)

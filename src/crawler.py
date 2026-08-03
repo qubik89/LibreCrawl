@@ -279,6 +279,71 @@ class WebCrawler:
         if should_save:
             self.save_requested.set()
 
+    def _sync_discovered_count(self):
+        """Keep the lifecycle counter aligned with the authoritative URL queue."""
+        live_discovered = 0
+        if self.link_manager:
+            live_discovered = self.link_manager.get_stats().get('discovered', 0)
+
+        with self.results_lock:
+            self.stats['discovered'] = max(
+                self.stats.get('discovered', 0),
+                live_discovered,
+                self.stats.get('crawled', 0),
+            )
+            return self.stats['discovered']
+
+    def _accept_crawl_result(self, result, requested_url=None, depth=None, source='HTTP'):
+        """Register one completed target and persist it exactly once."""
+        if not result:
+            return False
+
+        requested_url = requested_url or result.get('requested_url') or result.get('url')
+        depth = result.get('depth', depth or 0)
+        if requested_url and self.link_manager:
+            self.link_manager.mark_visited(requested_url)
+
+        with self.results_lock:
+            self.crawl_results.append(result)
+            result_url = result.get('url') or requested_url
+            if result_url:
+                self.url_statuses[result_url] = result.get('status_code')
+            self.stats['crawled'] += 1
+            self.stats['depth'] = max(self.stats['depth'], depth or 0)
+            self._log_verbose(
+                f"Added URL to results{f' ({source})' if source else ''}: "
+                f"{result_url} - Total in results: {len(self.crawl_results)}"
+            )
+
+        # URL rows are queued here, after every success and every error path.
+        self._queue_db_rows(urls=[result])
+        try:
+            self.user_memory.track_url(result)
+        except Exception as e:
+            print(f"Error tracking crawl result memory: {e}")
+
+        if self.issue_detector:
+            try:
+                issues_before = len(self.issue_detector.detected_issues)
+                issues_start = time.perf_counter()
+                self.issue_detector.detect_issues(result)
+                issues_ms = (time.perf_counter() - issues_start) * 1000
+                issues_after = len(self.issue_detector.detected_issues)
+                self._perf_add(
+                    issues=issues_after - issues_before,
+                    issues_ms=issues_ms,
+                )
+
+                if issues_after > issues_before:
+                    new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                    self.user_memory.track_issues(new_issues)
+                    self._queue_db_rows(issues=new_issues)
+            except Exception as e:
+                print(f"Error processing crawl result issues: {e}")
+
+        self._sync_discovered_count()
+        return True
+
     def _get_default_config(self):
         """Get default configuration"""
         return {
@@ -432,7 +497,7 @@ class WebCrawler:
 
             # Add initial URL
             self.link_manager.add_url(url, 0)
-            self.stats['discovered'] = 1
+            self._sync_discovered_count()
 
             # Discover sitemaps if enabled
             if self.config.get('discover_sitemaps', True):
@@ -516,7 +581,7 @@ class WebCrawler:
             else:
                 filtered_count += 1
 
-        self.stats['discovered'] = self.link_manager.get_stats()['discovered']
+        self._sync_discovered_count()
         self._log_verbose(f"Sitemap processing: {added_count} added, {filtered_count} filtered")
 
     def _is_sitemap_url(self, requested_url, final_url=None):
@@ -720,7 +785,9 @@ class WebCrawler:
                 if not self.link_manager.discovered_urls:
                     self._log_verbose("No pending URLs found - crawl was already complete")
 
-                self.stats['discovered'] = len(self.link_manager.all_discovered_urls)
+                self._sync_discovered_count()
+
+            self._sync_discovered_count()
 
             # Update status to running
             set_crawl_status(crawl_id, 'running')
@@ -755,8 +822,15 @@ class WebCrawler:
             elapsed = time.time() - self.stats['start_time']
             self.stats['speed'] = round(self.stats['crawled'] / max(elapsed, 1), 2)
 
+        self._sync_discovered_count()
+
         # Get link manager stats
         link_stats = self.link_manager.get_stats() if self.link_manager else {'discovered': 0}
+        discovered = max(
+            self.stats.get('discovered', 0),
+            link_stats.get('discovered', 0),
+            self.stats.get('crawled', 0),
+        )
 
         # Update link statuses before returning (ensures all crawled URLs have their status)
         if self.link_manager:
@@ -774,12 +848,12 @@ class WebCrawler:
             'status': status,
             'stats': {
                 **self.stats,
-                'discovered': link_stats['discovered']
+                'discovered': discovered
             },
             'urls': self.crawl_results.copy(),
             'links': self.link_manager.all_links.copy() if self.link_manager else [],
             'issues': self.issue_detector.get_issues() if self.issue_detector else [],
-            'progress': min(100, (self.stats['crawled'] / max(link_stats['discovered'], 1)) * 100),
+            'progress': min(100, (self.stats['crawled'] / max(discovered, 1)) * 100),
             'is_running_pagespeed': self.is_running_pagespeed,
             'memory': self.memory_monitor.get_stats(),
             'memory_data': data_sizes,
@@ -872,6 +946,7 @@ class WebCrawler:
             now = time.time()
             stats_saved = False
             if force or now - self.last_stats_save_time >= self.stats_save_interval:
+                self._sync_discovered_count()
                 memory_stats = self.memory_monitor.get_stats()
                 update_crawl_stats(
                     self.crawl_id,
@@ -1066,7 +1141,7 @@ class WebCrawler:
 
                         # Submit new tasks - fill ALL available slots, apply rate limiting per task
                         while (len(active_futures) < max_workers and
-                               self.stats['crawled'] < self.config['max_urls']):
+                               self.stats['crawled'] + len(active_futures) < self.config['max_urls']):
 
                             url_info = self.link_manager.get_next_url()
                             if not url_info:
@@ -1081,44 +1156,39 @@ class WebCrawler:
                             # Submit crawl task immediately - rate limiting happens inside the worker
                             self._log_verbose(f"Submitting task for: {current_url}")
                             future = executor.submit(self._crawl_url, current_url, depth)
-                            active_futures[future] = current_url
+                            active_futures[future] = (current_url, depth)
 
                         # Process completed tasks
                         completed_futures = []
                         for future in list(active_futures.keys()):
                             if future.done():
                                 completed_futures.append(future)
+                                requested_url, depth = active_futures[future]
                                 try:
                                     result = future.result()
-                                    if result:
-                                        with self.results_lock:
-                                            self.crawl_results.append(result)
-                                            self.url_statuses[result['url']] = result.get('status_code')
-                                            self.stats['crawled'] += 1
-                                            self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-                                            self._log_verbose(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
-
-                                        # Track per-user memory
-                                        self.user_memory.track_url(result)
-
-                                        # Detect issues
-                                        issues_before = len(self.issue_detector.detected_issues)
-                                        issues_start = time.perf_counter()
-                                        self.issue_detector.detect_issues(result)
-                                        issues_ms = (time.perf_counter() - issues_start) * 1000
-                                        issues_after = len(self.issue_detector.detected_issues)
-                                        self._perf_add(
-                                            issues=issues_after - issues_before,
-                                            issues_ms=issues_ms,
-                                        )
-
-                                        # Track + batch new issues
-                                        if issues_after > issues_before:
-                                            new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
-                                            self.user_memory.track_issues(new_issues)
-                                            self._queue_db_rows(issues=new_issues)
                                 except Exception as e:
                                     print(f"Error in crawl task: {e}")
+                                    result = self.seo_extractor.create_empty_result(
+                                        requested_url,
+                                        depth,
+                                        0,
+                                        str(e),
+                                        error_type=classify_fetch_error(e),
+                                    )
+                                if not result:
+                                    result = self.seo_extractor.create_empty_result(
+                                        requested_url,
+                                        depth,
+                                        0,
+                                        'Crawl task returned no result',
+                                        error_type='connection_error',
+                                    )
+                                self._accept_crawl_result(
+                                    result,
+                                    requested_url=requested_url,
+                                    depth=depth,
+                                    source='HTTP',
+                                )
 
                         # Remove completed futures
                         for future in completed_futures:
@@ -1404,15 +1474,14 @@ class WebCrawler:
                         final_url,
                         self._should_crawl_url,
                     )
+                    self._sync_discovered_count()
                     perf['discover_ms'] = (time.perf_counter() - discover_start) * 1000
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(final_url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
-            # Add to unsaved batch if DB persistence enabled
             self._perf_add(**perf)
-            self._queue_db_rows(urls=[result])
 
             return result
 
@@ -1543,13 +1612,11 @@ class WebCrawler:
 
             if should_extract:
                 self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
+                self._sync_discovered_count()
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
-
-            # Add to unsaved batch if DB persistence enabled
-            self._queue_db_rows(urls=[result])
 
             return result
 
@@ -1567,6 +1634,7 @@ class WebCrawler:
 
             max_workers = self.config.get('js_max_concurrent_pages', 3)
             active_tasks = set()
+            task_sources = {}
 
             while self.is_running and self.stats['crawled'] < self.config['max_urls']:
                 # Check if paused
@@ -1575,7 +1643,8 @@ class WebCrawler:
                     continue
 
                 # Submit new tasks - fill ALL available slots
-                while len(active_tasks) < max_workers:
+                while (len(active_tasks) < max_workers and
+                       self.stats['crawled'] + len(active_tasks) < self.config['max_urls']):
                     url_info = self.link_manager.get_next_url()
                     if not url_info:
                         break
@@ -1590,37 +1659,39 @@ class WebCrawler:
                         # Create task
                         task = asyncio.create_task(self._crawl_url_with_javascript(current_url, depth))
                         active_tasks.add(task)
+                        task_sources[task] = (current_url, depth)
 
                 # Process completed tasks
                 if active_tasks:
                     done, active_tasks = await asyncio.wait(active_tasks, timeout=0.01, return_when=asyncio.FIRST_COMPLETED)
 
                     for task in done:
+                        requested_url, depth = task_sources.pop(task, (None, 0))
                         try:
                             result = await task
-                            if result:
-                                with self.results_lock:
-                                    self.crawl_results.append(result)
-                                    self.url_statuses[result['url']] = result.get('status_code')
-                                    self.stats['crawled'] += 1
-                                    self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-                                    self._log_verbose(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
-
-                                # Track per-user memory
-                                self.user_memory.track_url(result)
-
-                                # Detect issues
-                                issues_before = len(self.issue_detector.detected_issues)
-                                self.issue_detector.detect_issues(result)
-                                issues_after = len(self.issue_detector.detected_issues)
-
-                                # Track + batch new issues
-                                if issues_after > issues_before:
-                                    new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
-                                    self.user_memory.track_issues(new_issues)
-                                    self._queue_db_rows(issues=new_issues)
                         except Exception as e:
                             print(f"Error in async crawl task: {e}")
+                            result = self.seo_extractor.create_empty_result(
+                                requested_url,
+                                depth,
+                                0,
+                                str(e),
+                                error_type=classify_fetch_error(e),
+                            )
+                        if not result:
+                            result = self.seo_extractor.create_empty_result(
+                                requested_url,
+                                depth,
+                                0,
+                                'Crawl task returned no result',
+                                error_type='connection_error',
+                            )
+                        self._accept_crawl_result(
+                            result,
+                            requested_url=requested_url,
+                            depth=depth,
+                            source='JS',
+                        )
 
                 # Demo mode: check per-user memory limit
                 if self.config.get('demo_mode') and self.user_memory.total_bytes >= self.config.get('demo_memory_limit_bytes', 0):
