@@ -71,6 +71,9 @@ services:
     image: clickhouse/clickhouse-server:latest
     container_name: mitmore-seo-crawl-clickhouse
     restart: unless-stopped
+    configs:
+      - source: clickhouse_logging
+        target: /etc/clickhouse-server/config.d/zz-disable-diagnostic-logs.xml
     environment:
       - CLICKHOUSE_DB=${CLICKHOUSE_DATABASE:-mitmore_seo_crawl}
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
@@ -94,6 +97,37 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-librecrawl}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+configs:
+  clickhouse_logging:
+    content: |
+      <clickhouse>
+        <logger><level>warning</level><size>10M</size><count>2</count></logger>
+        <trace_log remove="1" />
+        <text_log remove="1" />
+        <query_log remove="1" />
+        <query_metric_log remove="1" />
+        <aggregated_zookeeper_log remove="1" />
+        <zookeeper_connection_log remove="1" />
+        <zookeeper_log remove="1" />
+        <delta_lake_metadata_log remove="1" />
+        <iceberg_metadata_log remove="1" />
+        <query_thread_log remove="1" />
+        <query_views_log remove="1" />
+        <part_log remove="1" />
+        <metric_log remove="1" />
+        <asynchronous_metric_log remove="1" />
+        <processors_profile_log remove="1" />
+        <opentelemetry_span_log remove="1" />
+        <session_log remove="1" />
+        <error_log remove="1" />
+        <crash_log remove="1" />
+        <backup_log remove="1" />
+        <background_schedule_pool_log remove="1" />
+        <asynchronous_insert_log remove="1" />
+        <s3queue_log remove="1" />
+        <blob_storage_log remove="1" />
+      </clickhouse>
 
 volumes:
   clickhouse_data:
