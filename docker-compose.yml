@@ -104,6 +104,7 @@ configs:
       <clickhouse>
         <logger><level>warning</level><size>10M</size><count>2</count></logger>
         <trace_log remove="1" />
+        <instrumentation_trace_log remove="1" />
         <text_log remove="1" />
         <query_log remove="1" />
         <query_metric_log remove="1" />
